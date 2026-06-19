@@ -1,0 +1,102 @@
+# ---------------------------------------------
+# Visual Studio / WPF (.NET Framework) .gitignore
+# FolderGraph
+# ---------------------------------------------
+
+# 빌드 산출물
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+build/
+bld/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio 사용자별 설정 (공유하면 안 됨)
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# NuGet
+# packages 폴더는 복원 가능하므로 제외 (packages.config 자체는 커밋)
+**/packages/*
+!**/packages/build/
+*.nupkg
+*.snupkg
+.nuget/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# MSBuild / 빌드 부산물
+*.tlog
+*.log
+*.binlog
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.cache
+*.VisualState.xml
+TestResult.xml
+
+# ReSharper (사용 시)
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# Rider (사용 시)
+.idea/
+
+# 게시 / 배포
+publish/
+*.[Pp]ublish.xml
+*.azurePubxml
+*.pubxml
+*.publishproj
+PublishScripts/
+
+# ClickOnce
+*.application
+*.appref-ms
+
+# 단위 테스트 / 커버리지
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.coverage
+*.coveragexml
+*.testsettings
+
+# 운영체제 생성 파일
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 기타 임시 파일
+*.tmp
+*.bak
+*.swp
+*~

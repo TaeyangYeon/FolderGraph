@@ -4,17 +4,17 @@
 winexe
 C#
 .cs
-D:\YEON\PRAC\FolderGraph\FolderGraph\FolderGraph\obj\Debug\
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\
 FolderGraph
 none
 false
 DEBUG;TRACE
-D:\YEON\PRAC\FolderGraph\FolderGraph\FolderGraph\App.xaml
-11151548125
+D:\YEON\PRAC\FolderGraph\FolderGraph\App.xaml
+4-32160463
 
-9-258264976
-13-1505183044
-MainWindow.xaml;
+31-356607198
+51-877031483
+MainWindow.xaml;Resources\Styles.xaml;Views\GraphCanvasView.xaml;Views\ToolbarView.xaml;
 
-True
+False
 
