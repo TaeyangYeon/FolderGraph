@@ -121,3 +121,6 @@ D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.csproj.CoreCompileInp
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.csproj.CopyComplete
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.exe
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.pdb
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\GeneratedInternalTypeHelper.g.cs
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\App.baml
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\Resources\Styles.baml

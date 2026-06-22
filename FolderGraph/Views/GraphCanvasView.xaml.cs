@@ -1,22 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+﻿using System.Windows.Controls;
 
 namespace FolderGraph.Views
 {
     /// <summary>
-    /// GraphCanvasView.xaml에 대한 상호 작용 논리
+    /// 그래프(노드+엣지)를 그리는 캔버스 영역.
+    /// Phase 1: 정적 렌더링 + 호버 툴팁.
+    /// Phase 2 이후: Pan/Zoom, 노드 드래그 등을 코드비하인드/동작에 추가.
     /// </summary>
     public partial class GraphCanvasView : UserControl
     {

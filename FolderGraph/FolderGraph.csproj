@@ -161,12 +161,14 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="Converters\BooleanToVisibilityConverter.cs" />
     <Compile Include="Core\ObservableObject.cs" />
     <Compile Include="Core\RelayCommand.cs" />
     <Compile Include="Graph\Abstractions\IGraphLayoutEngine.cs" />
     <Compile Include="Graph\ForceDirectedLayout.cs" />
     <Compile Include="Graph\GraphEdge.cs" />
     <Compile Include="Graph\GraphNode.cs" />
+    <Compile Include="Graph\SimpleGridLayout.cs" />
     <Compile Include="Helpers\Abstractions\INodeColorCalculator.cs" />
     <Compile Include="Helpers\AppConstants.cs" />
     <Compile Include="Helpers\DepthColorCalculator.cs" />
@@ -176,6 +178,7 @@
     <Compile Include="Services\DialogService.cs" />
     <Compile Include="Services\FileOperationService.cs" />
     <Compile Include="Services\FolderScanner.cs" />
+    <Compile Include="ViewModels\EdgeViewModel.cs" />
     <Compile Include="ViewModels\MainViewModel.cs" />
     <Compile Include="ViewModels\NodeViewModel.cs" />
     <Compile Include="Views\GraphCanvasView.xaml.cs">
@@ -239,8 +242,6 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Converters\" />
-  </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

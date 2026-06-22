@@ -1,24 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+﻿using MahApps.Metro.Controls;
 
 namespace FolderGraph
 {
     /// <summary>
-    /// MainWindow.xaml에 대한 상호 작용 논리
+    /// 앱의 메인 창. MahApps.Metro의 MetroWindow를 상속해 현대적 외관을 적용.
+    /// DataContext(MainViewModel)는 App.OnStartup에서 주입된다.
     /// </summary>
-    public partial class MainWindow : Window
+    public partial class MainWindow : MetroWindow
     {
         public MainWindow()
         {

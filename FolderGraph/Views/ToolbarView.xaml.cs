@@ -1,22 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
+﻿using System.Windows.Controls;
 
 namespace FolderGraph.Views
 {
     /// <summary>
-    /// ToolbarView.xaml에 대한 상호 작용 논리
+    /// 상단 툴바: 경로 입력, 불러오기, 깊이 슬라이더, 숨김 표시 체크박스.
     /// </summary>
     public partial class ToolbarView : UserControl
     {
