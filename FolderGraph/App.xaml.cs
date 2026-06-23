@@ -19,9 +19,10 @@ namespace FolderGraph
 
             // ── 의존성 조립 ──
             IFolderScanner scanner = new FolderScanner();
-            IGraphLayoutEngine layout = new SimpleGridLayout(); // Phase 2에서 교체
+            IGraphLayoutEngine layout = new SimpleGridLayout();          // 초기 시드 배치
+            IForceDirectedSimulation simulation = new ForceDirectedSimulation(); // 애니메이션
 
-            var mainViewModel = new MainViewModel(scanner, layout);
+            var mainViewModel = new MainViewModel(scanner, layout, simulation);
 
             var window = new MainWindow
             {

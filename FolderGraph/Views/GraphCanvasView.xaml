@@ -6,12 +6,28 @@
              mc:Ignorable="d"
              d:DesignHeight="450" d:DesignWidth="800">
 
-    <!-- 스크롤 가능한 그래프 영역. Phase 2에서 Pan/Zoom으로 대체 -->
-    <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                  VerticalScrollBarVisibility="Auto"
-                  Background="#0F172A">
-        <Grid>
-            <!-- 엣지 레이어 (노드 아래에 그려지도록 먼저 배치) -->
+    <!--
+        Viewport(Grid)이 모든 마우스 이벤트를 받는다.
+        그 안의 RootCanvas에 ScaleTransform(줌) + TranslateTransform(이동)을 적용해
+        Pan/Zoom을 구현한다. 노드/엣지는 RootCanvas 로컬 좌표에 그려진다.
+    -->
+    <Grid x:Name="Viewport"
+          Background="#0F172A"
+          ClipToBounds="True"
+          MouseLeftButtonDown="Viewport_MouseLeftButtonDown"
+          MouseMove="Viewport_MouseMove"
+          MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
+          MouseWheel="Viewport_MouseWheel">
+
+        <Canvas x:Name="RootCanvas" Background="Transparent">
+            <Canvas.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform x:Name="ZoomTransform" ScaleX="1" ScaleY="1" />
+                    <TranslateTransform x:Name="PanTransform" X="0" Y="0" />
+                </TransformGroup>
+            </Canvas.RenderTransform>
+
+            <!-- 엣지 레이어 (노드 아래) -->
             <ItemsControl ItemsSource="{Binding Edges}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -22,7 +38,8 @@
                     <DataTemplate>
                         <Line X1="{Binding X1}" Y1="{Binding Y1}"
                               X2="{Binding X2}" Y2="{Binding Y2}"
-                              Stroke="#374151" StrokeThickness="1" />
+                              Stroke="#374151" StrokeThickness="1"
+                              IsHitTestVisible="False" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -42,7 +59,6 @@
                 </ItemsControl.ItemContainerStyle>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <!-- 노드 원. 호버 시 ToolTip으로 이름 표시 -->
                         <Ellipse Width="{Binding Diameter}"
                                  Height="{Binding Diameter}"
                                  Fill="{Binding Fill}"
@@ -52,6 +68,6 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
-        </Grid>
-    </ScrollViewer>
+        </Canvas>
+    </Grid>
 </UserControl>

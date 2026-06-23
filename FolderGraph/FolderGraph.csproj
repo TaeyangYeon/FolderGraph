@@ -164,8 +164,12 @@
     <Compile Include="Converters\BooleanToVisibilityConverter.cs" />
     <Compile Include="Core\ObservableObject.cs" />
     <Compile Include="Core\RelayCommand.cs" />
+    <Compile Include="Graph\Abstractions\GraphLink.cs" />
+    <Compile Include="Graph\Abstractions\IForceDirectedSimulation.cs" />
     <Compile Include="Graph\Abstractions\IGraphLayoutEngine.cs" />
+    <Compile Include="Graph\Abstractions\IPhysicsBody.cs" />
     <Compile Include="Graph\ForceDirectedLayout.cs" />
+    <Compile Include="Graph\ForceDirectedSimulation.cs" />
     <Compile Include="Graph\GraphEdge.cs" />
     <Compile Include="Graph\GraphNode.cs" />
     <Compile Include="Graph\SimpleGridLayout.cs" />

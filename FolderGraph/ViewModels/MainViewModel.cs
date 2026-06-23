@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using System.Windows.Threading;
 using FolderGraph.Core;
 using FolderGraph.Graph.Abstractions;
 using FolderGraph.Helpers;
@@ -15,12 +16,14 @@ namespace FolderGraph.ViewModels
     /// <summary>
     /// 메인 화면의 상태와 동작을 담당하는 ViewModel.
     /// 의존성은 생성자로 주입받는다 (DIP, App.xaml.cs에서 수동 조립).
-    /// Phase 1: 경로 입력 → 비동기 스캔 → 노드/엣지 생성 → 격자 배치까지.
+    /// Phase 2: 비동기 스캔 + Force-Directed 애니메이션(타이머 구동).
     /// </summary>
     public class MainViewModel : ObservableObject
     {
         private readonly IFolderScanner _scanner;
         private readonly IGraphLayoutEngine _layout;
+        private readonly IForceDirectedSimulation _simulation;
+        private readonly DispatcherTimer _simTimer;
 
         private string _rootPath;
         private int _depth;
@@ -29,13 +32,17 @@ namespace FolderGraph.ViewModels
         private string _statusText;
         private CancellationTokenSource _cts;
 
-        public MainViewModel(IFolderScanner scanner, IGraphLayoutEngine layout)
+        public MainViewModel(IFolderScanner scanner,
+                             IGraphLayoutEngine layout,
+                             IForceDirectedSimulation simulation)
         {
             if (scanner == null) throw new ArgumentNullException("scanner");
             if (layout == null) throw new ArgumentNullException("layout");
+            if (simulation == null) throw new ArgumentNullException("simulation");
 
             _scanner = scanner;
             _layout = layout;
+            _simulation = simulation;
 
             _depth = 3;
             _includeHidden = false;
@@ -43,6 +50,11 @@ namespace FolderGraph.ViewModels
 
             Nodes = new ObservableCollection<NodeViewModel>();
             Edges = new ObservableCollection<EdgeViewModel>();
+
+            // 레이아웃 애니메이션용 타이머(약 60fps)
+            _simTimer = new DispatcherTimer(DispatcherPriority.Background);
+            _simTimer.Interval = TimeSpan.FromMilliseconds(16);
+            _simTimer.Tick += OnSimulationTick;
 
             LoadCommand = new RelayCommand(async () => await LoadAsync(), CanLoad);
         }
@@ -140,10 +152,14 @@ namespace FolderGraph.ViewModels
         }
 
         /// <summary>
-        /// 스캔 결과로부터 NodeViewModel/EdgeViewModel을 만들고 배치한다.
+        /// 스캔 결과로부터 NodeViewModel/EdgeViewModel을 만들고,
+        /// 힘-기반 시뮬레이션을 초기화한 뒤 애니메이션을 시작한다.
         /// </summary>
         private void BuildGraph(GraphData data)
         {
+            // 진행 중 시뮬레이션 정지
+            _simTimer.Stop();
+
             Nodes.Clear();
             Edges.Clear();
 
@@ -158,7 +174,7 @@ namespace FolderGraph.ViewModels
                 nodeList.Add(vm);
             }
 
-            // 배치(임시 격자) — 영역 크기는 노드 수에 따라 동적으로
+            // 초기 시드 배치(격자) — 시뮬레이션이 여기서부터 펼친다
             double area = Math.Max(600, Math.Sqrt(nodeList.Count) * 90);
             _layout.Arrange(nodeList, area, area);
 
@@ -168,7 +184,8 @@ namespace FolderGraph.ViewModels
                 Nodes.Add(vm);
             }
 
-            // 엣지 생성: 부모가 있는 노드마다 부모-자식 선
+            // 엣지 생성 + 시뮬레이션 링크 구성
+            var links = new List<GraphLink>();
             foreach (FileNodeModel model in data.AllNodes)
             {
                 if (model.Parent != null && map.ContainsKey(model.Parent))
@@ -176,7 +193,46 @@ namespace FolderGraph.ViewModels
                     NodeViewModel parentVm = map[model.Parent];
                     NodeViewModel childVm = map[model];
                     Edges.Add(new EdgeViewModel(parentVm, childVm));
+                    links.Add(new GraphLink(parentVm, childVm));
                 }
+            }
+
+            // 시뮬레이션 초기화 후 시작
+            if (nodeList.Count > 0)
+            {
+                var bodies = new List<IPhysicsBody>(nodeList.Count);
+                foreach (NodeViewModel vm in nodeList)
+                {
+                    bodies.Add(vm);
+                }
+
+                double cx = area / 2.0;
+                double cy = area / 2.0;
+                _simulation.Initialize(bodies, links, cx, cy);
+                _simTimer.Start();
+            }
+        }
+
+        /// <summary>매 틱 한 스텝 진행. 안정되면 타이머를 멈춰 CPU를 아낀다.</summary>
+        private void OnSimulationTick(object sender, EventArgs e)
+        {
+            bool active = _simulation.Step();
+            if (!active)
+            {
+                _simTimer.Stop();
+            }
+        }
+
+        /// <summary>
+        /// 노드 드래그 등 사용자 상호작용 시 호출. 시뮬레이션 온도를 올리고
+        /// 멈춰 있던 타이머를 다시 돌려 주변 노드가 재배치되게 한다.
+        /// </summary>
+        public void ReheatSimulation()
+        {
+            _simulation.Reheat();
+            if (!_simTimer.IsEnabled)
+            {
+                _simTimer.Start();
             }
         }
     }

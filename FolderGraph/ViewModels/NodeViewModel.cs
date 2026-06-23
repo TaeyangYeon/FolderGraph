@@ -1,5 +1,6 @@
 ﻿using System.Windows.Media;
 using FolderGraph.Core;
+using FolderGraph.Graph.Abstractions;
 using FolderGraph.Helpers;
 using FolderGraph.Models;
 
@@ -8,15 +9,16 @@ namespace FolderGraph.ViewModels
     /// <summary>
     /// 화면에 그려지는 노드 하나의 표현(좌표·색·선택 상태 등).
     /// 데이터 모델(FileNodeModel)을 감싸고, 화면 관련 상태를 더한다.
-    /// Phase 1에서는 좌표/선택/색의 골격만 둔다.
+    /// IPhysicsBody를 구현해 힘-기반 시뮬레이션의 대상이 된다.
     /// </summary>
-    public class NodeViewModel : ObservableObject
+    public class NodeViewModel : ObservableObject, IPhysicsBody
     {
         private double _x;
         private double _y;
         private double _radius;
         private bool _isSelected;
         private bool _isHighlighted;
+        private bool _isPinned;
         private Brush _fill;
 
         public NodeViewModel(FileNodeModel model)
@@ -96,6 +98,16 @@ namespace FolderGraph.ViewModels
         {
             get { return _isHighlighted; }
             set { SetProperty(ref _isHighlighted, value); }
+        }
+
+        /// <summary>
+        /// 시뮬레이션 고정 여부. 드래그 중이거나 사용자가 배치한 노드는 true.
+        /// (IPhysicsBody 구현)
+        /// </summary>
+        public bool IsPinned
+        {
+            get { return _isPinned; }
+            set { SetProperty(ref _isPinned, value); }
         }
 
         public Brush Fill
