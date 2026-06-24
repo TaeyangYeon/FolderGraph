@@ -21,6 +21,15 @@ namespace FolderGraph.ViewModels
         public NodeViewModel Parent { get; private set; }
         public NodeViewModel Child { get; private set; }
 
+        private double _opacity = 1.0;
+
+        /// <summary>엣지 불투명도. 선택 시 무관한 엣지를 흐리게 한다.</summary>
+        public double Opacity
+        {
+            get { return _opacity; }
+            set { SetProperty(ref _opacity, value); }
+        }
+
         public double X1 { get { return Parent.X; } }
         public double Y1 { get { return Parent.Y; } }
         public double X2 { get { return Child.X; } }

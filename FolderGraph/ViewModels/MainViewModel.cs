@@ -24,6 +24,7 @@ namespace FolderGraph.ViewModels
         private readonly IGraphLayoutEngine _layout;
         private readonly IForceDirectedSimulation _simulation;
         private readonly DispatcherTimer _simTimer;
+        private readonly DispatcherTimer _depthDebounce;
 
         private string _rootPath;
         private int _depth;
@@ -31,6 +32,12 @@ namespace FolderGraph.ViewModels
         private bool _isBusy;
         private string _statusText;
         private CancellationTokenSource _cts;
+        private bool _hasLoaded;
+        private NodeViewModel _selectedNode;
+
+        // 선택 시 흐리게 할 불투명도
+        private const double DimOpacity = 0.22;
+        private const double DimEdgeOpacity = 0.10;
 
         public MainViewModel(IFolderScanner scanner,
                              IGraphLayoutEngine layout,
@@ -56,7 +63,12 @@ namespace FolderGraph.ViewModels
             _simTimer.Interval = TimeSpan.FromMilliseconds(16);
             _simTimer.Tick += OnSimulationTick;
 
-            LoadCommand = new RelayCommand(async () => await LoadAsync(), CanLoad);
+            // 깊이 슬라이더 디바운스(끌고 있는 동안 연속 재스캔 방지)
+            _depthDebounce = new DispatcherTimer();
+            _depthDebounce.Interval = TimeSpan.FromMilliseconds(300);
+            _depthDebounce.Tick += OnDepthDebounceTick;
+
+            LoadCommand = new RelayCommand(async () => await LoadAsync(false), CanLoad);
         }
 
         // ── 바인딩 속성 ──────────────────────────────
@@ -78,7 +90,12 @@ namespace FolderGraph.ViewModels
                 int clamped = value;
                 if (clamped < AppConstants.MinDepth) clamped = AppConstants.MinDepth;
                 if (clamped > AppConstants.MaxDepth) clamped = AppConstants.MaxDepth;
-                SetProperty(ref _depth, clamped);
+                if (SetProperty(ref _depth, clamped) && _hasLoaded)
+                {
+                    // 한 번 로드된 뒤 깊이를 바꾸면, 잠시 후 재스캔(위치 보존).
+                    _depthDebounce.Stop();
+                    _depthDebounce.Start();
+                }
             }
         }
 
@@ -112,7 +129,7 @@ namespace FolderGraph.ViewModels
             return !_isBusy && !string.IsNullOrWhiteSpace(_rootPath);
         }
 
-        private async Task LoadAsync()
+        private async Task LoadAsync(bool preservePositions)
         {
             if (_cts != null)
             {
@@ -129,7 +146,8 @@ namespace FolderGraph.ViewModels
                 GraphData data = await _scanner.ScanAsync(
                     _rootPath, _depth, _includeHidden, _cts.Token);
 
-                BuildGraph(data);
+                BuildGraph(data, preservePositions);
+                _hasLoaded = true;
 
                 StatusText = data.TruncatedByLimit
                     ? string.Format("노드 {0}개 (최대치 {1} 도달로 일부 생략)",
@@ -151,14 +169,45 @@ namespace FolderGraph.ViewModels
             }
         }
 
+        private async void OnDepthDebounceTick(object sender, EventArgs e)
+        {
+            _depthDebounce.Stop();
+            if (_hasLoaded && !string.IsNullOrWhiteSpace(_rootPath))
+            {
+                await LoadAsync(true); // 깊이 변경 → 위치 보존 재스캔
+            }
+        }
+
         /// <summary>
         /// 스캔 결과로부터 NodeViewModel/EdgeViewModel을 만들고,
         /// 힘-기반 시뮬레이션을 초기화한 뒤 애니메이션을 시작한다.
         /// </summary>
-        private void BuildGraph(GraphData data)
+        private void BuildGraph(GraphData data, bool preservePositions)
         {
             // 진행 중 시뮬레이션 정지
             _simTimer.Stop();
+
+            // 위치 보존: 기존 노드의 경로별 상태(좌표/고정/색)를 스냅샷
+            var snapshot = new Dictionary<string, NodeSnapshot>();
+            if (preservePositions)
+            {
+                foreach (NodeViewModel old in Nodes)
+                {
+                    if (!snapshot.ContainsKey(old.FullPath))
+                    {
+                        snapshot[old.FullPath] = new NodeSnapshot
+                        {
+                            X = old.X,
+                            Y = old.Y,
+                            IsPinned = old.IsPinned,
+                            Fill = old.Fill
+                        };
+                    }
+                }
+            }
+
+            // 선택 상태는 재구성 시 해제
+            _selectedNode = null;
 
             Nodes.Clear();
             Edges.Clear();
@@ -174,9 +223,25 @@ namespace FolderGraph.ViewModels
                 nodeList.Add(vm);
             }
 
-            // 초기 시드 배치(격자) — 시뮬레이션이 여기서부터 펼친다
+            // 초기 시드 배치(격자) — 모든 노드에 좌표 부여
             double area = Math.Max(600, Math.Sqrt(nodeList.Count) * 90);
             _layout.Arrange(nodeList, area, area);
+
+            // 보존 대상은 기존 좌표로 덮어쓰기(새 노드는 시드 좌표 유지)
+            if (preservePositions)
+            {
+                foreach (NodeViewModel vm in nodeList)
+                {
+                    NodeSnapshot s;
+                    if (snapshot.TryGetValue(vm.FullPath, out s))
+                    {
+                        vm.X = s.X;
+                        vm.Y = s.Y;
+                        vm.IsPinned = s.IsPinned;
+                        vm.Fill = s.Fill;
+                    }
+                }
+            }
 
             // 노드 등록
             foreach (NodeViewModel vm in nodeList)
@@ -184,7 +249,7 @@ namespace FolderGraph.ViewModels
                 Nodes.Add(vm);
             }
 
-            // 엣지 생성 + 시뮬레이션 링크 구성
+            // 엣지 + 링크 + VM 자식 트리 구성
             var links = new List<GraphLink>();
             foreach (FileNodeModel model in data.AllNodes)
             {
@@ -194,6 +259,7 @@ namespace FolderGraph.ViewModels
                     NodeViewModel childVm = map[model];
                     Edges.Add(new EdgeViewModel(parentVm, childVm));
                     links.Add(new GraphLink(parentVm, childVm));
+                    parentVm.Children.Add(childVm); // 선택 시 자손 순회용
                 }
             }
 
@@ -208,7 +274,9 @@ namespace FolderGraph.ViewModels
 
                 double cx = area / 2.0;
                 double cy = area / 2.0;
-                _simulation.Initialize(bodies, links, cx, cy);
+                // 위치 보존이면 낮은 에너지로 시작(기존 배치 유지), 신규면 완전 확산
+                double energy = preservePositions ? 0.12 : 1.0;
+                _simulation.Initialize(bodies, links, cx, cy, energy);
                 _simTimer.Start();
             }
         }
@@ -234,6 +302,90 @@ namespace FolderGraph.ViewModels
             {
                 _simTimer.Start();
             }
+        }
+
+        // ── 선택 / 하이라이트 ────────────────────────
+
+        /// <summary>
+        /// 노드를 선택한다. 그 노드와 모든 하위 자손을 강조하고,
+        /// 나머지 노드/엣지는 흐리게 처리한다.
+        /// </summary>
+        public void SelectNode(NodeViewModel node)
+        {
+            if (node == null)
+            {
+                ClearSelection();
+                return;
+            }
+
+            _selectedNode = node;
+
+            // 선택 노드 + 모든 하위 자손 수집
+            var set = new HashSet<NodeViewModel>();
+            CollectSubtree(node, set);
+
+            foreach (NodeViewModel n in Nodes)
+            {
+                bool inSet = set.Contains(n);
+                n.IsHighlighted = inSet;
+                n.IsSelected = (n == node);
+
+                if (n == node)
+                {
+                    n.ApplySelectedStyle();
+                }
+                else
+                {
+                    n.ResetStyle();
+                }
+                // ResetStyle/ApplySelectedStyle 이후에 흐림 적용
+                n.Opacity = inSet ? 1.0 : DimOpacity;
+            }
+
+            foreach (EdgeViewModel ed in Edges)
+            {
+                bool both = set.Contains(ed.Parent) && set.Contains(ed.Child);
+                ed.Opacity = both ? 1.0 : DimEdgeOpacity;
+            }
+        }
+
+        /// <summary>선택을 해제하고 모든 강조/흐림을 원래대로 되돌린다.</summary>
+        public void ClearSelection()
+        {
+            _selectedNode = null;
+
+            foreach (NodeViewModel n in Nodes)
+            {
+                n.IsHighlighted = false;
+                n.IsSelected = false;
+                n.ResetStyle(); // 테두리/불투명도 원복
+            }
+
+            foreach (EdgeViewModel ed in Edges)
+            {
+                ed.Opacity = 1.0;
+            }
+        }
+
+        private void CollectSubtree(NodeViewModel root, HashSet<NodeViewModel> set)
+        {
+            if (!set.Add(root))
+            {
+                return; // 이미 방문(순환 방지)
+            }
+            foreach (NodeViewModel child in root.Children)
+            {
+                CollectSubtree(child, set);
+            }
+        }
+
+        /// <summary>위치 보존용 스냅샷.</summary>
+        private class NodeSnapshot
+        {
+            public double X;
+            public double Y;
+            public bool IsPinned;
+            public System.Windows.Media.Brush Fill;
         }
     }
 }

@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -7,23 +8,31 @@ using FolderGraph.ViewModels;
 namespace FolderGraph.Views
 {
     /// <summary>
-    /// 그래프 캔버스. Phase 2:
-    /// - 빈 공간 드래그 → Pan(이동)
-    /// - 마우스 휠 → Zoom(커서 기준 확대/축소)
-    /// - 노드 드래그 → 해당 노드 위치 이동(드래그 동안/이후 고정)
-    /// 저수준 마우스 처리라 코드비하인드에 둔다(MVVM에서 허용되는 영역).
+    /// 그래프 캔버스. Phase 3:
+    /// - 클릭과 드래그를 임계값으로 구분
+    /// - 노드 클릭 → 선택(+ 모든 하위 자손 하이라이트)
+    /// - 노드 드래그 → 위치 이동(놓으면 고정 해제)
+    /// - 빈 공간 클릭 → 선택 해제 / 빈 공간 드래그 → Pan
+    /// - 휠 → 커서 기준 Zoom
     /// </summary>
     public partial class GraphCanvasView : UserControl
     {
         private const double MinZoom = 0.2;
         private const double MaxZoom = 4.0;
         private const double ZoomStep = 1.1;
+        private const double DragThreshold = 4.0; // 이 거리 이상 움직이면 드래그로 간주
 
-        private bool _isPanning;
-        private bool _isDraggingNode;
-        private NodeViewModel _draggedNode;
-        private Point _lastScreenPoint;   // 패닝 델타 계산용(Viewport 기준)
-        private Vector _grabOffset;       // 노드 중심과 잡은 지점의 차이(RootCanvas 기준)
+        // 노드 누름 상태
+        private bool _mouseDownOnNode;
+        private NodeViewModel _pressedNode;
+        private bool _nodeDragStarted;
+        private Vector _grabOffset;
+
+        // 빈 공간(패닝) 상태
+        private bool _mouseDownOnEmpty;
+
+        private Point _pressScreenPoint;  // 누른 지점(Viewport 기준) — 클릭/드래그 판정
+        private Point _lastScreenPoint;   // 패닝 델타용
 
         public GraphCanvasView()
         {
@@ -35,56 +44,70 @@ namespace FolderGraph.Views
             get { return DataContext as MainViewModel; }
         }
 
-        // ── 마우스 다운: 노드면 노드 드래그, 빈 공간이면 패닝 ──
         private void Viewport_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            _pressScreenPoint = e.GetPosition(Viewport);
+            _lastScreenPoint = _pressScreenPoint;
+
             NodeViewModel node = FindNode(e.OriginalSource as DependencyObject);
 
             if (node != null)
             {
-                // 노드 드래그 시작 — 시뮬레이션이 건드리지 않도록 고정
-                _isDraggingNode = true;
-                _draggedNode = node;
-                node.IsPinned = true;
-
-                Point canvasPoint = e.GetPosition(RootCanvas);
-                _grabOffset = new Vector(node.X - canvasPoint.X, node.Y - canvasPoint.Y);
-
-                if (ViewModel != null)
-                {
-                    ViewModel.ReheatSimulation(); // 주변 노드가 반응하도록
-                }
+                _mouseDownOnNode = true;
+                _mouseDownOnEmpty = false;
+                _pressedNode = node;
+                _nodeDragStarted = false;
             }
             else
             {
-                // 빈 공간 → 패닝 시작
-                _isPanning = true;
-                _lastScreenPoint = e.GetPosition(Viewport);
+                _mouseDownOnNode = false;
+                _mouseDownOnEmpty = true;
+                _pressedNode = null;
             }
 
             Viewport.CaptureMouse();
         }
 
-        // ── 마우스 이동: 드래그 중인 동작 수행 ──
         private void Viewport_MouseMove(object sender, MouseEventArgs e)
         {
-            if (_isDraggingNode && _draggedNode != null)
-            {
-                Point canvasPoint = e.GetPosition(RootCanvas);
-                _draggedNode.X = canvasPoint.X + _grabOffset.X;
-                _draggedNode.Y = canvasPoint.Y + _grabOffset.Y;
+            Point current = e.GetPosition(Viewport);
 
-                // 이동 중에도 시뮬레이션 온도를 유지해야 자식 노드(특히 또 다른
-                // 자식을 가진 폴더 노드)가 끌려온다. 시작 때 한 번만 깨우면
-                // 온도가 식어 폴더 노드가 이동량 제한에 막혀 안 따라온다.
-                if (ViewModel != null)
+            if (_mouseDownOnNode && _pressedNode != null)
+            {
+                if (!_nodeDragStarted)
                 {
-                    ViewModel.ReheatSimulation();
+                    // 임계값을 넘으면 그때부터 드래그 시작
+                    if ((current - _pressScreenPoint).Length > DragThreshold)
+                    {
+                        _nodeDragStarted = true;
+                        _pressedNode.IsPinned = true;
+
+                        Point cp = e.GetPosition(RootCanvas);
+                        _grabOffset = new Vector(_pressedNode.X - cp.X, _pressedNode.Y - cp.Y);
+
+                        if (ViewModel != null)
+                        {
+                            ViewModel.ReheatSimulation();
+                        }
+                    }
+                }
+
+                if (_nodeDragStarted)
+                {
+                    Point cp = e.GetPosition(RootCanvas);
+                    _pressedNode.X = cp.X + _grabOffset.X;
+                    _pressedNode.Y = cp.Y + _grabOffset.Y;
+
+                    // 이동 중 온도 유지 → 자식(폴더 포함)이 따라온다
+                    if (ViewModel != null)
+                    {
+                        ViewModel.ReheatSimulation();
+                    }
                 }
             }
-            else if (_isPanning)
+            else if (_mouseDownOnEmpty)
             {
-                Point current = e.GetPosition(Viewport);
+                // 빈 공간 드래그 → 패닝
                 Vector delta = current - _lastScreenPoint;
                 PanTransform.X += delta.X;
                 PanTransform.Y += delta.Y;
@@ -92,29 +115,47 @@ namespace FolderGraph.Views
             }
         }
 
-        // ── 마우스 업: 드래그 종료 ──
         private void Viewport_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
-            if (_isDraggingNode && _draggedNode != null)
+            Point current = e.GetPosition(Viewport);
+            double moved = (current - _pressScreenPoint).Length;
+
+            if (_mouseDownOnNode && _pressedNode != null)
             {
-                _draggedNode.IsPinned = false;
-                // 드롭한 자리에 고정 유지(사용자가 배치한 위치 보존).
-                // 주변 노드가 한 번 더 정리되도록 reheat.
-                if (ViewModel != null)
+                if (_nodeDragStarted)
                 {
-                    ViewModel.ReheatSimulation();
+                    // 드래그 종료 → 고정 해제(이후 부모 이동 시 따라오도록)
+                    _pressedNode.IsPinned = false;
+                    if (ViewModel != null)
+                    {
+                        ViewModel.ReheatSimulation();
+                    }
+                }
+                else
+                {
+                    // 거의 안 움직였으면 클릭 → 선택
+                    if (ViewModel != null)
+                    {
+                        ViewModel.SelectNode(_pressedNode);
+                    }
+                }
+            }
+            else if (_mouseDownOnEmpty)
+            {
+                // 빈 공간을 거의 안 움직이고 뗐으면 클릭 → 선택 해제
+                if (moved < DragThreshold && ViewModel != null)
+                {
+                    ViewModel.ClearSelection();
                 }
             }
 
-
-            _isDraggingNode = false;
-            _draggedNode = null;
-            _isPanning = false;
-
+            _mouseDownOnNode = false;
+            _mouseDownOnEmpty = false;
+            _nodeDragStarted = false;
+            _pressedNode = null;
             Viewport.ReleaseMouseCapture();
         }
 
-        // ── 마우스 휠: 커서 기준 줌 ──
         private void Viewport_MouseWheel(object sender, MouseWheelEventArgs e)
         {
             Point screen = e.GetPosition(Viewport);
@@ -127,7 +168,6 @@ namespace FolderGraph.Views
                 return;
             }
 
-            // 커서 아래의 캔버스 점이 그대로 유지되도록 Pan 보정
             double canvasX = (screen.X - PanTransform.X) / oldScale;
             double canvasY = (screen.Y - PanTransform.Y) / oldScale;
 
@@ -140,7 +180,7 @@ namespace FolderGraph.Views
 
         /// <summary>
         /// 클릭된 비주얼에서 위로 올라가며 DataContext가 NodeViewModel인 요소를 찾는다.
-        /// 빈 공간 클릭이면 null.
+        /// 빈 공간이면 null.
         /// </summary>
         private NodeViewModel FindNode(DependencyObject source)
         {

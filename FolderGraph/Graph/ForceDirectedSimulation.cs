@@ -50,8 +50,7 @@ namespace FolderGraph.Graph
             get { return _temperature <= _initialTemp * SettleRatio; }
         }
 
-        public void Initialize(IList<IPhysicsBody> bodies, IList<GraphLink> links,
-                               double centerX, double centerY)
+        public void Initialize(IList<IPhysicsBody> bodies, IList<GraphLink> links, double centerX, double centerY, double initialEnergy)
         {
             int n = bodies != null ? bodies.Count : 0;
 
@@ -107,7 +106,7 @@ namespace FolderGraph.Graph
             // 초기 온도: 영역 한 변의 약 8%
             double span = Math.Max(centerX, centerY) * 2.0;
             _initialTemp = Math.Max(20.0, span * 0.08);
-            _temperature = _initialTemp;
+            _temperature = _initialTemp * initialEnergy;
         }
 
         public void Reheat()

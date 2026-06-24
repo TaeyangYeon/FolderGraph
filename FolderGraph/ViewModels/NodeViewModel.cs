@@ -1,4 +1,5 @@
-﻿using System.Windows.Media;
+﻿using System.Collections.Generic;
+using System.Windows.Media;
 using FolderGraph.Core;
 using FolderGraph.Graph.Abstractions;
 using FolderGraph.Helpers;
@@ -13,20 +14,42 @@ namespace FolderGraph.ViewModels
     /// </summary>
     public class NodeViewModel : ObservableObject, IPhysicsBody
     {
+        // 선택 시 강조 테두리(주황) / 기본 테두리
+        private static readonly Brush DefaultStroke = MakeFrozen(Color.FromRgb(0x1E, 0x29, 0x3B));
+        private static readonly Brush SelectedStroke = MakeFrozen(Color.FromRgb(0xF5, 0x9E, 0x0B));
+
         private double _x;
         private double _y;
         private double _radius;
         private bool _isSelected;
         private bool _isHighlighted;
         private bool _isPinned;
+        private double _opacity;
         private Brush _fill;
+        private Brush _strokeBrush;
+        private double _strokeThickness;
 
         public NodeViewModel(FileNodeModel model)
         {
             Model = model;
             _radius = AppConstants.DefaultNodeRadius;
             _fill = Brushes.Gray; // 색 미지정 기본값 = 회색
+            _opacity = 1.0;
+            _strokeBrush = DefaultStroke;
+            _strokeThickness = 1.0;
+            Children = new List<NodeViewModel>();
         }
+
+        /// <summary>VM 레벨 자식 노드 목록(선택 시 자손 하이라이트 순회에 사용).</summary>
+        public List<NodeViewModel> Children { get; private set; }
+
+        private static Brush MakeFrozen(Color c)
+        {
+            var b = new SolidColorBrush(c);
+            b.Freeze();
+            return b;
+        }
+
 
         /// <summary>감싸고 있는 데이터 모델.</summary>
         public FileNodeModel Model { get; private set; }
@@ -114,6 +137,42 @@ namespace FolderGraph.ViewModels
         {
             get { return _fill; }
             set { SetProperty(ref _fill, value); }
+        }
+
+        /// <summary>노드 불투명도. 선택 시 비강조 노드를 흐리게 하는 데 사용.</summary>
+        public double Opacity
+        {
+            get { return _opacity; }
+            set { SetProperty(ref _opacity, value); }
+        }
+
+        /// <summary>테두리 색. 선택된 노드는 주황으로 강조.</summary>
+        public Brush StrokeBrush
+        {
+            get { return _strokeBrush; }
+            set { SetProperty(ref _strokeBrush, value); }
+        }
+
+        /// <summary>테두리 두께. 선택된 노드는 두껍게.</summary>
+        public double StrokeThicknessValue
+        {
+            get { return _strokeThickness; }
+            set { SetProperty(ref _strokeThickness, value); }
+        }
+
+        /// <summary>선택 강조 적용(자기 자신이 선택된 노드일 때).</summary>
+        public void ApplySelectedStyle()
+        {
+            StrokeBrush = SelectedStroke;
+            StrokeThicknessValue = 2.5;
+        }
+
+        /// <summary>강조 스타일 초기화.</summary>
+        public void ResetStyle()
+        {
+            StrokeBrush = DefaultStroke;
+            StrokeThicknessValue = 1.0;
+            Opacity = 1.0;
         }
 
         /// <summary>X/Y가 바뀌면 Left/Top/Diameter도 갱신 알림.</summary>

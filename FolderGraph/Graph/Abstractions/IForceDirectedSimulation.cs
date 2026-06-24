@@ -17,7 +17,7 @@ namespace FolderGraph.Graph.Abstractions
         /// <param name="centerX">중심 인력 기준 X.</param>
         /// <param name="centerY">중심 인력 기준 Y.</param>
         void Initialize(IList<IPhysicsBody> bodies, IList<GraphLink> links,
-                        double centerX, double centerY);
+                        double centerX, double centerY, double initialEnergy);
 
         /// <summary>
         /// 한 틱 진행한다. 아직 움직이는 중이면 true,
