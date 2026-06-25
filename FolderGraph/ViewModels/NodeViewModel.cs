@@ -91,6 +91,14 @@ namespace FolderGraph.ViewModels
             }
         }
 
+        private double _z;
+        /// <summary>3D Z 좌표. (물리 3축 확장 전까지는 깊이 기반으로 초기 분산)</summary>
+        public double Z
+        {
+            get { return _z; }
+            set { SetProperty(ref _z, value); }
+        }
+
         public double Radius
         {
             get { return _radius; }

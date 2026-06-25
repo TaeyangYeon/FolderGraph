@@ -310,6 +310,7 @@ namespace FolderGraph.ViewModels
                         {
                             X = old.X,
                             Y = old.Y,
+                            Z = old.Z,
                             IsPinned = old.IsPinned,
                             Fill = old.Fill,
                             IsColored = old.IsColored,
@@ -342,6 +343,16 @@ namespace FolderGraph.ViewModels
             double area = Math.Max(600, Math.Sqrt(nodeList.Count) * 90);
             _layout.Arrange(nodeList, area, area);
 
+            // 3D 입체감: 깊이에 따라 Z를 분산(물리 3축 확장 전 임시 분포).
+            // 같은 깊이라도 약간씩 흩어지게 해 평면이 아닌 공간감을 준다.
+            var zrnd = new Random(20240624);
+            foreach (NodeViewModel vm in nodeList)
+            {
+                double layer = vm.Depth * 140.0;                 // 깊이별 층
+                double jitter = (zrnd.NextDouble() - 0.5) * 120.0; // 층 내 흩뜨림
+                vm.Z = layer + jitter;
+            }
+
             // 보존 대상은 기존 좌표로 덮어쓰기(새 노드는 시드 좌표 유지)
             if (preservePositions)
             {
@@ -352,6 +363,7 @@ namespace FolderGraph.ViewModels
                     {
                         vm.X = s.X;
                         vm.Y = s.Y;
+                        vm.Z = s.Z;
                         vm.IsPinned = s.IsPinned;
                         vm.Fill = s.Fill;
                         vm.IsColored = s.IsColored;
@@ -860,6 +872,7 @@ namespace FolderGraph.ViewModels
         {
             public double X;
             public double Y;
+            public double Z;
             public bool IsPinned;
             public System.Windows.Media.Brush Fill;
             public bool IsColored;

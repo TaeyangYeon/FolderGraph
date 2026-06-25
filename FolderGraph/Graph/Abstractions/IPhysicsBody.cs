@@ -13,6 +13,9 @@
         /// <summary>중심 Y 좌표(캔버스 로컬 좌표).</summary>
         double Y { get; set; }
 
+        /// <summary>중심 Z 좌표(3D 깊이).</summary>
+        double Z { get; set; }
+
         /// <summary>
         /// 고정 여부. 사용자가 드래그로 잡았거나 위치를 고정한 노드는 true가 되어
         /// 시뮬레이션이 위치를 바꾸지 않는다(다른 노드에 힘은 계속 행사).

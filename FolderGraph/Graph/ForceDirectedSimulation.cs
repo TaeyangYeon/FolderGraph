@@ -20,8 +20,10 @@ namespace FolderGraph.Graph
         private IPhysicsBody[] _bodies;
         private double[] _px;
         private double[] _py;
+        private double[] _pz;
         private double[] _dx;
         private double[] _dy;
+        private double[] _dz;
         private bool[] _pinned;
 
         // 연결(인덱스 쌍)
@@ -31,6 +33,7 @@ namespace FolderGraph.Graph
         private double _k;            // 이상적 노드 간 거리
         private double _centerX;
         private double _centerY;
+        private double _centerZ;
         private double _temperature;  // 현재 온도(틱당 최대 이동량)
         private double _initialTemp;  // Reheat 시 복귀할 온도
 
@@ -57,12 +60,15 @@ namespace FolderGraph.Graph
             _bodies = new IPhysicsBody[n];
             _px = new double[n];
             _py = new double[n];
+            _pz = new double[n];
             _dx = new double[n];
             _dy = new double[n];
+            _dz = new double[n];
             _pinned = new bool[n];
 
             _centerX = centerX;
             _centerY = centerY;
+            _centerZ = 0.0;
 
             // body → 인덱스 매핑 (링크 변환용)
             var indexOf = new Dictionary<IPhysicsBody, int>(n);
@@ -75,6 +81,7 @@ namespace FolderGraph.Graph
                 // 대칭 고착을 깨기 위한 미세 지터
                 _px[i] = b.X + (rnd.NextDouble() - 0.5);
                 _py[i] = b.Y + (rnd.NextDouble() - 0.5);
+                _pz[i] = b.Z + (rnd.NextDouble() - 0.5);
                 _pinned[i] = b.IsPinned;
                 indexOf[b] = i;
             }
@@ -137,9 +144,11 @@ namespace FolderGraph.Graph
                 {
                     _px[i] = _bodies[i].X;
                     _py[i] = _bodies[i].Y;
+                    _pz[i] = _bodies[i].Z;
                 }
                 _dx[i] = 0.0;
                 _dy[i] = 0.0;
+                _dz[i] = 0.0;
             }
 
             // 1) 반발력 (모든 쌍) — O(n^2)
@@ -148,11 +157,13 @@ namespace FolderGraph.Graph
             {
                 double xi = _px[i];
                 double yi = _py[i];
+                double zi = _pz[i];
                 for (int j = i + 1; j < n; j++)
                 {
                     double ddx = xi - _px[j];
                     double ddy = yi - _py[j];
-                    double distSq = ddx * ddx + ddy * ddy;
+                    double ddz = zi - _pz[j];
+                    double distSq = ddx * ddx + ddy * ddy + ddz * ddz;
                     if (distSq < Epsilon)
                     {
                         distSq = Epsilon;
@@ -161,10 +172,13 @@ namespace FolderGraph.Graph
                     double force = kSq / dist;       // 반발 크기
                     double ux = ddx / dist;
                     double uy = ddy / dist;
+                    double uz = ddz / dist;
                     _dx[i] += ux * force;
                     _dy[i] += uy * force;
+                    _dz[i] += uz * force;
                     _dx[j] -= ux * force;
                     _dy[j] -= uy * force;
+                    _dz[j] -= uz * force;
                 }
             }
 
@@ -175,7 +189,8 @@ namespace FolderGraph.Graph
                 int b = _linkB[e];
                 double ddx = _px[b] - _px[a];
                 double ddy = _py[b] - _py[a];
-                double dist = Math.Sqrt(ddx * ddx + ddy * ddy);
+                double ddz = _pz[b] - _pz[a];
+                double dist = Math.Sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 if (dist < Epsilon)
                 {
                     dist = Epsilon;
@@ -183,10 +198,13 @@ namespace FolderGraph.Graph
                 double force = (dist * dist) / _k;   // 인력 크기
                 double ux = ddx / dist;
                 double uy = ddy / dist;
+                double uz = ddz / dist;
                 _dx[a] += ux * force;
                 _dy[a] += uy * force;
+                _dz[a] += uz * force;
                 _dx[b] -= ux * force;
                 _dy[b] -= uy * force;
+                _dz[b] -= uz * force;
             }
 
             // 3) 중심 인력(흩어짐 방지)
@@ -194,6 +212,7 @@ namespace FolderGraph.Graph
             {
                 _dx[i] += (_centerX - _px[i]) * Gravity * _k;
                 _dy[i] += (_centerY - _py[i]) * Gravity * _k;
+                _dz[i] += (_centerZ - _pz[i]) * Gravity * _k;
             }
 
             // 4) 온도로 이동량 제한 후 적용
@@ -204,18 +223,21 @@ namespace FolderGraph.Graph
                     continue; // 고정 노드는 위치 유지
                 }
 
-                double dispLen = Math.Sqrt(_dx[i] * _dx[i] + _dy[i] * _dy[i]);
+                double dispLen = Math.Sqrt(_dx[i] * _dx[i] + _dy[i] * _dy[i] + _dz[i] * _dz[i]);
                 if (dispLen < Epsilon)
                 {
                     continue;
                 }
                 double capped = Math.Min(dispLen, _temperature);
-                _px[i] += (_dx[i] / dispLen) * capped;
-                _py[i] += (_dy[i] / dispLen) * capped;
+                double s = capped / dispLen;
+                _px[i] += _dx[i] * s;
+                _py[i] += _dy[i] * s;
+                _pz[i] += _dz[i] * s;
 
                 // 결과를 실제 body에 반영(좌표 setter가 PropertyChanged를 발생 → UI 갱신)
                 _bodies[i].X = _px[i];
                 _bodies[i].Y = _py[i];
+                _bodies[i].Z = _pz[i];
             }
 
             // 냉각

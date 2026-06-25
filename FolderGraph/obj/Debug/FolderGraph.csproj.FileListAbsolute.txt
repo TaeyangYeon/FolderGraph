@@ -124,3 +124,5 @@ D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\GeneratedInternalTypeHelper.g.cs
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\App.baml
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\Resources\Styles.baml
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.csprojAssemblyReference.cache
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\View3D\Graph3DView.baml
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\View3D\Graph3DView.g.cs

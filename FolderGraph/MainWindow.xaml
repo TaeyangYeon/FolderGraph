@@ -3,6 +3,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:mah="http://metro.mahapps.com/winfx/xaml/controls"
                  xmlns:views="clr-namespace:FolderGraph.Views"
+                 xmlns:view3d="clr-namespace:FolderGraph.View3D"
                  Title="FolderGraph" Height="700" Width="1100"
                  WindowStartupLocation="CenterScreen">
 
@@ -16,8 +17,8 @@
         <!-- 상단 툴바 -->
         <views:ToolbarView Grid.Row="0" />
 
-        <!-- 중앙 그래프 캔버스 -->
-        <views:GraphCanvasView Grid.Row="1" />
+        <!-- 중앙 3D 그래프 뷰 -->
+        <view3d:Graph3DView Grid.Row="1" />
 
         <!-- 하단 상태바 -->
         <Border Grid.Row="2" Background="#1E293B" Padding="10,4">

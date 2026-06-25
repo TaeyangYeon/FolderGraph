@@ -5,30 +5,21 @@ using FolderGraph.Graph.Abstractions;
 namespace FolderGraph.Graph
 {
     /// <summary>
-    /// ForceDirectedSimulation과 동일한 Fruchterman-Reingold 모델이지만,
-    /// 반발력 계산을 "균일 공간 격자(uniform grid)"로 가속한 버전.
+    /// 3D Fruchterman-Reingold 시뮬레이션을 "균일 공간 격자(uniform grid)"로 가속한 버전.
+    /// 반발력을 같은 칸 + 인접 26칸(3D) 안에서만 계산하므로, 노드가 퍼져 있으면
+    /// 사실상 O(n)에 가깝다. 기본 ForceDirectedSimulation과 인터페이스가 같다.
     ///
-    /// 기본 구현은 모든 노드 쌍을 보아 O(n^2)이라 노드가 많으면 느리다.
-    /// 이 구현은 각 노드를 격자 칸에 넣고, 같은 칸 + 인접 8칸의 노드끼리만
-    /// 반발력을 계산한다(컷오프 거리 밖은 영향이 작아 무시). 노드가 고르게
-    /// 퍼져 있으면 사실상 O(n)에 가깝다.
-    ///
-    /// 사용법: App.xaml.cs의 조립부에서
-    ///   IForceDirectedSimulation simulation = new ForceDirectedSimulation();
-    /// 를
-    ///   IForceDirectedSimulation simulation = new GridForceSimulation();
-    /// 로 바꾸면 된다(인터페이스가 같아 다른 코드는 그대로).
-    ///
-    /// ※ 아래 Cooling/ReheatFactor 등 튜닝 상수는 ForceDirectedSimulation의
-    ///   본인 설정값과 맞추고 싶으면 동일하게 바꿔 사용한다.
+    /// 전환: App.xaml.cs에서 new ForceDirectedSimulation() → new GridForceSimulation()
     /// </summary>
     public class GridForceSimulation : IForceDirectedSimulation
     {
         private IPhysicsBody[] _bodies;
         private double[] _px;
         private double[] _py;
+        private double[] _pz;
         private double[] _dx;
         private double[] _dy;
+        private double[] _dz;
         private bool[] _pinned;
         private int[] _linkA;
         private int[] _linkB;
@@ -36,9 +27,10 @@ namespace FolderGraph.Graph
         private double _k;
         private double _centerX;
         private double _centerY;
+        private double _centerZ;
         private double _temperature;
         private double _initialTemp;
-        private double _cutoff;          // 반발력 컷오프(= 격자 칸 크기)
+        private double _cutoff;
 
         // 튜닝 상수(ForceDirectedSimulation과 의미 동일)
         private const double Cooling = 0.985;
@@ -46,9 +38,8 @@ namespace FolderGraph.Graph
         private const double Gravity = 0.012;
         private const double ReheatFactor = 0.35;
         private const double Epsilon = 0.01;
-        private const double CutoffFactor = 2.5; // 컷오프 = k * 이 값
+        private const double CutoffFactor = 2.5;
 
-        // 격자 상태(Step마다 재구성)
         private Dictionary<long, List<int>> _grid;
 
         public bool IsSettled
@@ -64,12 +55,15 @@ namespace FolderGraph.Graph
             _bodies = new IPhysicsBody[n];
             _px = new double[n];
             _py = new double[n];
+            _pz = new double[n];
             _dx = new double[n];
             _dy = new double[n];
+            _dz = new double[n];
             _pinned = new bool[n];
 
             _centerX = centerX;
             _centerY = centerY;
+            _centerZ = 0.0;
 
             var indexOf = new Dictionary<IPhysicsBody, int>(n);
             var rnd = new Random(12345);
@@ -79,6 +73,7 @@ namespace FolderGraph.Graph
                 _bodies[i] = b;
                 _px[i] = b.X + (rnd.NextDouble() - 0.5);
                 _py[i] = b.Y + (rnd.NextDouble() - 0.5);
+                _pz[i] = b.Z + (rnd.NextDouble() - 0.5);
                 _pinned[i] = b.IsPinned;
                 indexOf[b] = i;
             }
@@ -138,66 +133,76 @@ namespace FolderGraph.Graph
                 {
                     _px[i] = _bodies[i].X;
                     _py[i] = _bodies[i].Y;
+                    _pz[i] = _bodies[i].Z;
                 }
                 _dx[i] = 0.0;
                 _dy[i] = 0.0;
+                _dz[i] = 0.0;
             }
 
             BuildGrid(n);
 
-            // 1) 반발력 — 같은 칸 + 인접 8칸 내의 노드끼리만
             double kSq = _k * _k;
             double cutoffSq = _cutoff * _cutoff;
 
+            // 1) 반발력 — 같은 칸 + 인접 26칸(3D)
             foreach (KeyValuePair<long, List<int>> cell in _grid)
             {
-                int cx, cy;
-                DecodeKey(cell.Key, out cx, out cy);
+                int cx, cy, cz;
+                DecodeKey(cell.Key, out cx, out cy, out cz);
+                List<int> here = cell.Value;
 
                 for (int gx = cx - 1; gx <= cx + 1; gx++)
                 {
                     for (int gy = cy - 1; gy <= cy + 1; gy++)
                     {
-                        List<int> neighbors;
-                        if (!_grid.TryGetValue(EncodeKey(gx, gy), out neighbors))
+                        for (int gz = cz - 1; gz <= cz + 1; gz++)
                         {
-                            continue;
-                        }
-
-                        List<int> here = cell.Value;
-                        for (int a = 0; a < here.Count; a++)
-                        {
-                            int i = here[a];
-                            double xi = _px[i];
-                            double yi = _py[i];
-
-                            for (int b = 0; b < neighbors.Count; b++)
+                            List<int> neighbors;
+                            if (!_grid.TryGetValue(EncodeKey(gx, gy, gz), out neighbors))
                             {
-                                int j = neighbors[b];
-                                if (j <= i)
-                                {
-                                    continue; // 각 쌍 1회만(중복/자기자신 방지)
-                                }
+                                continue;
+                            }
 
-                                double ddx = xi - _px[j];
-                                double ddy = yi - _py[j];
-                                double distSq = ddx * ddx + ddy * ddy;
-                                if (distSq > cutoffSq)
+                            for (int a = 0; a < here.Count; a++)
+                            {
+                                int i = here[a];
+                                double xi = _px[i];
+                                double yi = _py[i];
+                                double zi = _pz[i];
+
+                                for (int bIdx = 0; bIdx < neighbors.Count; bIdx++)
                                 {
-                                    continue; // 컷오프 밖은 무시
+                                    int j = neighbors[bIdx];
+                                    if (j <= i)
+                                    {
+                                        continue;
+                                    }
+
+                                    double ddx = xi - _px[j];
+                                    double ddy = yi - _py[j];
+                                    double ddz = zi - _pz[j];
+                                    double distSq = ddx * ddx + ddy * ddy + ddz * ddz;
+                                    if (distSq > cutoffSq)
+                                    {
+                                        continue;
+                                    }
+                                    if (distSq < Epsilon)
+                                    {
+                                        distSq = Epsilon;
+                                    }
+                                    double dist = Math.Sqrt(distSq);
+                                    double force = kSq / dist;
+                                    double ux = ddx / dist;
+                                    double uy = ddy / dist;
+                                    double uz = ddz / dist;
+                                    _dx[i] += ux * force;
+                                    _dy[i] += uy * force;
+                                    _dz[i] += uz * force;
+                                    _dx[j] -= ux * force;
+                                    _dy[j] -= uy * force;
+                                    _dz[j] -= uz * force;
                                 }
-                                if (distSq < Epsilon)
-                                {
-                                    distSq = Epsilon;
-                                }
-                                double dist = Math.Sqrt(distSq);
-                                double force = kSq / dist;
-                                double ux = ddx / dist;
-                                double uy = ddy / dist;
-                                _dx[i] += ux * force;
-                                _dy[i] += uy * force;
-                                _dx[j] -= ux * force;
-                                _dy[j] -= uy * force;
                             }
                         }
                     }
@@ -211,7 +216,8 @@ namespace FolderGraph.Graph
                 int b = _linkB[e];
                 double ddx = _px[b] - _px[a];
                 double ddy = _py[b] - _py[a];
-                double dist = Math.Sqrt(ddx * ddx + ddy * ddy);
+                double ddz = _pz[b] - _pz[a];
+                double dist = Math.Sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
                 if (dist < Epsilon)
                 {
                     dist = Epsilon;
@@ -219,10 +225,13 @@ namespace FolderGraph.Graph
                 double force = (dist * dist) / _k;
                 double ux = ddx / dist;
                 double uy = ddy / dist;
+                double uz = ddz / dist;
                 _dx[a] += ux * force;
                 _dy[a] += uy * force;
+                _dz[a] += uz * force;
                 _dx[b] -= ux * force;
                 _dy[b] -= uy * force;
+                _dz[b] -= uz * force;
             }
 
             // 3) 중심 인력
@@ -230,6 +239,7 @@ namespace FolderGraph.Graph
             {
                 _dx[i] += (_centerX - _px[i]) * Gravity * _k;
                 _dy[i] += (_centerY - _py[i]) * Gravity * _k;
+                _dz[i] += (_centerZ - _pz[i]) * Gravity * _k;
             }
 
             // 4) 온도 제한 후 적용
@@ -239,16 +249,19 @@ namespace FolderGraph.Graph
                 {
                     continue;
                 }
-                double dispLen = Math.Sqrt(_dx[i] * _dx[i] + _dy[i] * _dy[i]);
+                double dispLen = Math.Sqrt(_dx[i] * _dx[i] + _dy[i] * _dy[i] + _dz[i] * _dz[i]);
                 if (dispLen < Epsilon)
                 {
                     continue;
                 }
                 double capped = Math.Min(dispLen, _temperature);
-                _px[i] += (_dx[i] / dispLen) * capped;
-                _py[i] += (_dy[i] / dispLen) * capped;
+                double s = capped / dispLen;
+                _px[i] += _dx[i] * s;
+                _py[i] += _dy[i] * s;
+                _pz[i] += _dz[i] * s;
                 _bodies[i].X = _px[i];
                 _bodies[i].Y = _py[i];
+                _bodies[i].Z = _pz[i];
             }
 
             _temperature *= Cooling;
@@ -263,7 +276,8 @@ namespace FolderGraph.Graph
             {
                 int cx = (int)Math.Floor(_px[i] * inv);
                 int cy = (int)Math.Floor(_py[i] * inv);
-                long key = EncodeKey(cx, cy);
+                int cz = (int)Math.Floor(_pz[i] * inv);
+                long key = EncodeKey(cx, cy, cz);
                 List<int> list;
                 if (!_grid.TryGetValue(key, out list))
                 {
@@ -274,16 +288,20 @@ namespace FolderGraph.Graph
             }
         }
 
-        private static long EncodeKey(int x, int y)
+        // 3개의 21비트 정수를 하나의 long 키로(±~100만 범위)
+        private static long EncodeKey(int x, int y, int z)
         {
-            // 두 32비트 정수를 하나의 long 키로
-            return ((long)x << 32) ^ (uint)y;
+            long lx = (long)(x + 1048576) & 0x1FFFFF;
+            long ly = (long)(y + 1048576) & 0x1FFFFF;
+            long lz = (long)(z + 1048576) & 0x1FFFFF;
+            return (lx << 42) | (ly << 21) | lz;
         }
 
-        private static void DecodeKey(long key, out int x, out int y)
+        private static void DecodeKey(long key, out int x, out int y, out int z)
         {
-            x = (int)(key >> 32);
-            y = (int)(uint)(key & 0xFFFFFFFF);
+            x = (int)((key >> 42) & 0x1FFFFF) - 1048576;
+            y = (int)((key >> 21) & 0x1FFFFF) - 1048576;
+            z = (int)(key & 0x1FFFFF) - 1048576;
         }
 
         private static double Clamp(double v, double min, double max)
