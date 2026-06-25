@@ -156,6 +156,24 @@ namespace FolderGraph.Views
             Viewport.ReleaseMouseCapture();
         }
 
+        // ── 우클릭: 노드 위에서 색상 팔레트 열기 ──
+        private void Viewport_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            NodeViewModel node = FindNode(e.OriginalSource as DependencyObject);
+            if (node == null || ViewModel == null)
+            {
+                return; // 빈 공간 우클릭은 무시
+            }
+
+            // 팝업을 커서 위치(Viewport 기준)에 띄운다
+            Point p = e.GetPosition(Viewport);
+            PalettePopup.HorizontalOffset = p.X;
+            PalettePopup.VerticalOffset = p.Y;
+
+            ViewModel.OpenPaletteFor(node); // ColorTarget 설정 + IsPaletteOpen=true
+            e.Handled = true;
+        }
+
         private void Viewport_MouseWheel(object sender, MouseWheelEventArgs e)
         {
             Point screen = e.GetPosition(Viewport);

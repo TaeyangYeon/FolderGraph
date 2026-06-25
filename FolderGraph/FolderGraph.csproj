@@ -185,6 +185,7 @@
     <Compile Include="ViewModels\EdgeViewModel.cs" />
     <Compile Include="ViewModels\MainViewModel.cs" />
     <Compile Include="ViewModels\NodeViewModel.cs" />
+    <Compile Include="ViewModels\PaletteColor.cs" />
     <Compile Include="Views\GraphCanvasView.xaml.cs">
       <DependentUpon>GraphCanvasView.xaml</DependentUpon>
     </Compile>

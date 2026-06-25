@@ -4,10 +4,12 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using FolderGraph.Core;
 using FolderGraph.Graph.Abstractions;
 using FolderGraph.Helpers;
+using FolderGraph.Helpers.Abstractions;
 using FolderGraph.Models;
 using FolderGraph.Services.Abstractions;
 
@@ -23,6 +25,7 @@ namespace FolderGraph.ViewModels
         private readonly IFolderScanner _scanner;
         private readonly IGraphLayoutEngine _layout;
         private readonly IForceDirectedSimulation _simulation;
+        private readonly INodeColorCalculator _colorCalculator;
         private readonly DispatcherTimer _simTimer;
         private readonly DispatcherTimer _depthDebounce;
 
@@ -35,21 +38,29 @@ namespace FolderGraph.ViewModels
         private bool _hasLoaded;
         private NodeViewModel _selectedNode;
 
+        // 색상 팔레트 상태
+        private NodeViewModel _colorTargetNode;
+        private bool _isPaletteOpen;
+        private static readonly Brush GrayBrush = MakeFrozenGray();
+
         // 선택 시 흐리게 할 불투명도
         private const double DimOpacity = 0.22;
         private const double DimEdgeOpacity = 0.10;
 
         public MainViewModel(IFolderScanner scanner,
                              IGraphLayoutEngine layout,
-                             IForceDirectedSimulation simulation)
+                             IForceDirectedSimulation simulation,
+                             INodeColorCalculator colorCalculator)
         {
             if (scanner == null) throw new ArgumentNullException("scanner");
             if (layout == null) throw new ArgumentNullException("layout");
             if (simulation == null) throw new ArgumentNullException("simulation");
+            if (colorCalculator == null) throw new ArgumentNullException("colorCalculator");
 
             _scanner = scanner;
             _layout = layout;
             _simulation = simulation;
+            _colorCalculator = colorCalculator;
 
             _depth = 3;
             _includeHidden = false;
@@ -57,6 +68,7 @@ namespace FolderGraph.ViewModels
 
             Nodes = new ObservableCollection<NodeViewModel>();
             Edges = new ObservableCollection<EdgeViewModel>();
+            PaletteColors = BuildPalette();
 
             // 레이아웃 애니메이션용 타이머(약 60fps)
             _simTimer = new DispatcherTimer(DispatcherPriority.Background);
@@ -69,6 +81,15 @@ namespace FolderGraph.ViewModels
             _depthDebounce.Tick += OnDepthDebounceTick;
 
             LoadCommand = new RelayCommand(async () => await LoadAsync(false), CanLoad);
+            PickColorCommand = new RelayCommand<PaletteColor>(OnPickColor);
+            ResetColorCommand = new RelayCommand(OnResetColor);
+        }
+
+        private static Brush MakeFrozenGray()
+        {
+            var b = new SolidColorBrush(Colors.Gray);
+            b.Freeze();
+            return b;
         }
 
         // ── 바인딩 속성 ──────────────────────────────
@@ -121,6 +142,18 @@ namespace FolderGraph.ViewModels
         public int MaxDepth { get { return AppConstants.MaxDepth; } }
 
         public ICommand LoadCommand { get; private set; }
+        public ICommand PickColorCommand { get; private set; }
+        public ICommand ResetColorCommand { get; private set; }
+
+        /// <summary>우클릭 팔레트에 표시할 기준 색 목록.</summary>
+        public IReadOnlyList<PaletteColor> PaletteColors { get; private set; }
+
+        /// <summary>색상 팔레트 팝업 열림 여부(View의 Popup.IsOpen과 양방향 바인딩).</summary>
+        public bool IsPaletteOpen
+        {
+            get { return _isPaletteOpen; }
+            set { SetProperty(ref _isPaletteOpen, value); }
+        }
 
         // ── 동작 ────────────────────────────────────
 
@@ -376,6 +409,115 @@ namespace FolderGraph.ViewModels
             foreach (NodeViewModel child in root.Children)
             {
                 CollectSubtree(child, set);
+            }
+        }
+
+        // ── 색상 팔레트 ──────────────────────────────
+
+        /// <summary>우클릭한 노드를 색상 대상에 두고 팔레트를 연다(View에서 호출).</summary>
+        public void OpenPaletteFor(NodeViewModel node)
+        {
+            if (node == null)
+            {
+                return;
+            }
+            _colorTargetNode = node;
+            IsPaletteOpen = true;
+        }
+
+        private void OnPickColor(PaletteColor pick)
+        {
+            if (_colorTargetNode != null && pick != null)
+            {
+                ApplyColorToSubtree(_colorTargetNode, pick.Color);
+            }
+            IsPaletteOpen = false;
+        }
+
+        private void OnResetColor()
+        {
+            if (_colorTargetNode != null)
+            {
+                ResetSubtreeColor(_colorTargetNode);
+            }
+            IsPaletteOpen = false;
+        }
+
+        /// <summary>
+        /// 대상 노드(depth 0)와 모든 하위 자손에 기준 색을 적용한다.
+        /// 자손은 상대 깊이에 따라 흰색을 더 섞어 옅어진다. 기존 색은 덮어쓴다.
+        /// </summary>
+        private void ApplyColorToSubtree(NodeViewModel root, Color baseColor)
+        {
+            var queue = new Queue<NodeDepth>();
+            var visited = new HashSet<NodeViewModel>();
+            queue.Enqueue(new NodeDepth(root, 0));
+
+            while (queue.Count > 0)
+            {
+                NodeDepth nd = queue.Dequeue();
+                if (!visited.Add(nd.Node))
+                {
+                    continue;
+                }
+
+                Color shade = _colorCalculator.GetShade(baseColor, nd.Depth);
+                var brush = new SolidColorBrush(shade);
+                brush.Freeze();
+                nd.Node.Fill = brush;
+
+                foreach (NodeViewModel child in nd.Node.Children)
+                {
+                    queue.Enqueue(new NodeDepth(child, nd.Depth + 1));
+                }
+            }
+        }
+
+        /// <summary>대상 노드와 모든 하위 자손을 기본 회색으로 되돌린다.</summary>
+        private void ResetSubtreeColor(NodeViewModel root)
+        {
+            var set = new HashSet<NodeViewModel>();
+            CollectSubtree(root, set);
+            foreach (NodeViewModel n in set)
+            {
+                n.Fill = GrayBrush;
+            }
+        }
+
+        private static IReadOnlyList<PaletteColor> BuildPalette()
+        {
+            // 현대적인 톤의 기준 색 모음(depth 0의 색).
+            var colors = new List<PaletteColor>
+            {
+                new PaletteColor(Color.FromRgb(0xEF, 0x44, 0x44)), // red
+                new PaletteColor(Color.FromRgb(0xF9, 0x73, 0x16)), // orange
+                new PaletteColor(Color.FromRgb(0xF5, 0x9E, 0x0B)), // amber
+                new PaletteColor(Color.FromRgb(0xEA, 0xB3, 0x08)), // yellow
+                new PaletteColor(Color.FromRgb(0x84, 0xCC, 0x16)), // lime
+                new PaletteColor(Color.FromRgb(0x22, 0xC5, 0x5E)), // green
+                new PaletteColor(Color.FromRgb(0x10, 0xB9, 0x81)), // emerald
+                new PaletteColor(Color.FromRgb(0x14, 0xB8, 0xA6)), // teal
+                new PaletteColor(Color.FromRgb(0x06, 0xB6, 0xD4)), // cyan
+                new PaletteColor(Color.FromRgb(0x3B, 0x82, 0xF6)), // blue
+                new PaletteColor(Color.FromRgb(0x63, 0x66, 0xF1)), // indigo
+                new PaletteColor(Color.FromRgb(0x8B, 0x5C, 0xF6)), // violet
+                new PaletteColor(Color.FromRgb(0xA8, 0x55, 0xF7)), // purple
+                new PaletteColor(Color.FromRgb(0xEC, 0x48, 0x99)), // pink
+                new PaletteColor(Color.FromRgb(0xF4, 0x3F, 0x5E)), // rose
+                new PaletteColor(Color.FromRgb(0x64, 0x74, 0x8B))  // slate
+            };
+            return colors;
+        }
+
+        /// <summary>색상 적용 BFS에서 쓰는 (노드, 상대깊이) 쌍.</summary>
+        private struct NodeDepth
+        {
+            public readonly NodeViewModel Node;
+            public readonly int Depth;
+            public NodeDepth(NodeViewModel node, int depth)
+            {
+                Node = node;
+                Depth = depth;
             }
         }
 
