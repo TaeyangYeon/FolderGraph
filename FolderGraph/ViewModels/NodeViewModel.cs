@@ -14,9 +14,10 @@ namespace FolderGraph.ViewModels
     /// </summary>
     public class NodeViewModel : ObservableObject, IPhysicsBody
     {
-        // 선택 시 강조 테두리(주황) / 기본 테두리
+        // 선택 시 강조 테두리(주황) / 검색 매칭 테두리(하늘색) / 기본 테두리
         private static readonly Brush DefaultStroke = MakeFrozen(Color.FromRgb(0x1E, 0x29, 0x3B));
         private static readonly Brush SelectedStroke = MakeFrozen(Color.FromRgb(0xF5, 0x9E, 0x0B));
+        private static readonly Brush SearchStroke = MakeFrozen(Color.FromRgb(0x38, 0xBD, 0xF8));
 
         private double _x;
         private double _y;
@@ -24,6 +25,7 @@ namespace FolderGraph.ViewModels
         private bool _isSelected;
         private bool _isHighlighted;
         private bool _isPinned;
+        private bool _isDropTarget;
         private double _opacity;
         private Brush _fill;
         private Brush _strokeBrush;
@@ -133,6 +135,24 @@ namespace FolderGraph.ViewModels
             set { SetProperty(ref _isPinned, value); }
         }
 
+        /// <summary>드래그 중 이 노드가 드롭 대상 폴더로 지목되었는지(파란 점선 강조).</summary>
+        public bool IsDropTarget
+        {
+            get { return _isDropTarget; }
+            set { SetProperty(ref _isDropTarget, value); }
+        }
+
+        // ── 색 상태(이동 시 색 재지정/스냅샷 복원에 사용; 바인딩 대상 아님) ──
+
+        /// <summary>사용자 지정 색이 적용되었는지 여부(미적용=회색).</summary>
+        public bool IsColored { get; set; }
+
+        /// <summary>적용된 색 그라데이션의 기준 색(depth 0의 색).</summary>
+        public Color ColorBase { get; set; }
+
+        /// <summary>색 그라데이션 기준에서 이 노드의 상대 깊이(이동 시 자손 깊이 계산에 사용).</summary>
+        public int ColorDepth { get; set; }
+
         public Brush Fill
         {
             get { return _fill; }
@@ -164,6 +184,13 @@ namespace FolderGraph.ViewModels
         public void ApplySelectedStyle()
         {
             StrokeBrush = SelectedStroke;
+            StrokeThicknessValue = 2.5;
+        }
+
+        /// <summary>검색 매칭 강조 적용(하늘색 테두리).</summary>
+        public void ApplySearchStyle()
+        {
+            StrokeBrush = SearchStroke;
             StrokeThicknessValue = 2.5;
         }
 

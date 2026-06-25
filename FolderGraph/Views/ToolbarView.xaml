@@ -4,12 +4,15 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d"
-             d:DesignHeight="56" d:DesignWidth="900">
+             d:DesignHeight="56" d:DesignWidth="1000">
 
     <Border Padding="10,8" Background="#1E293B">
         <Grid>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="2*" MinWidth="160" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="1.4*" MinWidth="150" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
@@ -27,15 +30,61 @@
             <Button Grid.Column="1"
                     Content="불러오기"
                     Padding="14,4"
-                    Margin="0,0,12,0"
+                    Margin="0,0,16,0"
                     Command="{Binding LoadCommand}" />
 
+            <!-- 검색창 -->
+            <Grid Grid.Column="2" Margin="0,0,4,0">
+                <TextBox x:Name="SearchBox"
+                         VerticalContentAlignment="Center"
+                         Padding="4,0,52,0"
+                         Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="파일/폴더 이름 검색 (Esc로 지우기)">
+                    <TextBox.InputBindings>
+                        <KeyBinding Key="Escape" Command="{Binding ClearSearchCommand}" />
+                    </TextBox.InputBindings>
+                </TextBox>
+                <!-- 검색어 없을 때 안내 -->
+                <TextBlock Text="🔍 검색"
+                           Foreground="#64748B"
+                           IsHitTestVisible="False"
+                           VerticalAlignment="Center"
+                           Margin="8,0,0,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasSearchText}" Value="False">
+                                    <Setter Property="Visibility" Value="Visible" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <!-- 매칭 수 -->
+                <TextBlock Foreground="#38BDF8"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Right"
+                           Margin="0,0,8,0"
+                           Text="{Binding MatchCount, StringFormat={}{0}개}"
+                           Visibility="{Binding HasSearchText, Converter={StaticResource BoolToVis}}" />
+            </Grid>
+
+            <!-- 검색 지우기 -->
+            <Button Grid.Column="3"
+                    Content="✕"
+                    Padding="8,4"
+                    Margin="0,0,16,0"
+                    ToolTip="검색 지우기"
+                    Command="{Binding ClearSearchCommand}"
+                    Visibility="{Binding HasSearchText, Converter={StaticResource BoolToVis}}" />
+
             <!-- 깊이 슬라이더 -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal"
+            <StackPanel Grid.Column="4" Orientation="Horizontal"
                         VerticalAlignment="Center" Margin="0,0,12,0">
                 <TextBlock Text="깊이" Foreground="#CBD5E1"
                            VerticalAlignment="Center" Margin="0,0,6,0" />
-                <Slider Width="120" VerticalAlignment="Center"
+                <Slider Width="110" VerticalAlignment="Center"
                         Minimum="{Binding MinDepth}"
                         Maximum="{Binding MaxDepth}"
                         Value="{Binding Depth}"
@@ -46,15 +95,38 @@
             </StackPanel>
 
             <!-- 숨김 표시 체크박스 -->
-            <CheckBox Grid.Column="3"
+            <CheckBox Grid.Column="5"
                       Content="숨김 표시"
                       Foreground="#CBD5E1"
                       VerticalAlignment="Center"
-                      Margin="0,0,8,0"
+                      Margin="0,0,12,0"
                       IsChecked="{Binding IncludeHidden}" />
 
+            <!-- 미니맵 토글 / PNG 내보내기 -->
+            <StackPanel Grid.Column="6" Orientation="Horizontal"
+                        VerticalAlignment="Center" Margin="0,0,8,0">
+                <Button Padding="10,4" Margin="0,0,6,0"
+                        ToolTip="전체 미리보기 표시/숨김"
+                        Command="{Binding ToggleMinimapCommand}">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Content" Value="미니맵 켜기" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding ShowMinimap}" Value="True">
+                                    <Setter Property="Content" Value="미니맵 끄기" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Content="PNG 내보내기"
+                        Padding="10,4"
+                        ToolTip="현재 보이는 그래프를 PNG로 저장"
+                        Command="{Binding ExportImageCommand}" />
+            </StackPanel>
+
             <!-- 진행 표시 -->
-            <TextBlock Grid.Column="4"
+            <TextBlock Grid.Column="7"
                        Text="스캔 중..."
                        Foreground="#93C5FD"
                        VerticalAlignment="Center"

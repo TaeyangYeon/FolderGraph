@@ -24,8 +24,11 @@ namespace FolderGraph
             IGraphLayoutEngine layout = new SimpleGridLayout();          // 초기 시드 배치
             IForceDirectedSimulation simulation = new ForceDirectedSimulation(); // 애니메이션
             INodeColorCalculator colorCalculator = new DepthColorCalculator();   // 명도 그라데이션
+            IFileOperationService fileOps = new FileOperationService();          // 파일 이동/열기
+            IDialogService dialog = new DialogService();                         // 확인/에러 팝업
 
-            var mainViewModel = new MainViewModel(scanner, layout, simulation, colorCalculator);
+            var mainViewModel = new MainViewModel(
+                scanner, layout, simulation, colorCalculator, fileOps, dialog);
 
             var window = new MainWindow
             {

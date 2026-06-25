@@ -7,7 +7,6 @@
              d:DesignHeight="450" d:DesignWidth="800">
 
     <UserControl.Resources>
-        <!-- 팔레트 색상 스와치 버튼: 기본 크롬 제거, 둥근 색상 사각형 -->
         <Style x:Key="SwatchButton" TargetType="Button">
             <Setter Property="Width" Value="26" />
             <Setter Property="Height" Value="26" />
@@ -33,10 +32,6 @@
         </Style>
     </UserControl.Resources>
 
-    <!--
-        Viewport(Grid)이 모든 마우스 이벤트를 받는다.
-        RootCanvas에 ScaleTransform(줌) + TranslateTransform(이동)을 적용.
-    -->
     <Grid x:Name="Viewport"
           Background="#0F172A"
           ClipToBounds="True"
@@ -46,6 +41,7 @@
           MouseRightButtonUp="Viewport_MouseRightButtonUp"
           MouseWheel="Viewport_MouseWheel">
 
+        <!-- RootCanvas: 줌/이동 변환을 담는다 -->
         <Canvas x:Name="RootCanvas" Background="Transparent">
             <Canvas.RenderTransform>
                 <TransformGroup>
@@ -54,52 +50,107 @@
                 </TransformGroup>
             </Canvas.RenderTransform>
 
-            <!-- 엣지 레이어 -->
-            <ItemsControl ItemsSource="{Binding Edges}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <Canvas />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Line X1="{Binding X1}" Y1="{Binding Y1}"
-                              X2="{Binding X2}" Y2="{Binding Y2}"
-                              Stroke="#374151" StrokeThickness="1"
-                              Opacity="{Binding Opacity}"
-                              IsHitTestVisible="False" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+            <!-- GraphLayer: 변환이 적용되지 않는 그래프 콘텐츠. 미니맵이 이걸 비춘다 -->
+            <Grid x:Name="GraphLayer">
+                <!-- 엣지 레이어 -->
+                <ItemsControl ItemsSource="{Binding Edges}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Line X1="{Binding X1}" Y1="{Binding Y1}"
+                                  X2="{Binding X2}" Y2="{Binding Y2}"
+                                  Stroke="#374151" StrokeThickness="1"
+                                  Opacity="{Binding Opacity}"
+                                  IsHitTestVisible="False" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
-            <!-- 노드 레이어 -->
-            <ItemsControl ItemsSource="{Binding Nodes}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <Canvas />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemContainerStyle>
-                    <Style TargetType="ContentPresenter">
-                        <Setter Property="Canvas.Left" Value="{Binding Left}" />
-                        <Setter Property="Canvas.Top" Value="{Binding Top}" />
-                    </Style>
-                </ItemsControl.ItemContainerStyle>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Ellipse Width="{Binding Diameter}"
-                                 Height="{Binding Diameter}"
-                                 Fill="{Binding Fill}"
-                                 Stroke="{Binding StrokeBrush}"
-                                 StrokeThickness="{Binding StrokeThicknessValue}"
-                                 Opacity="{Binding Opacity}"
-                                 ToolTip="{Binding DisplayLabel}" />
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                <!-- 노드 레이어 -->
+                <ItemsControl ItemsSource="{Binding Nodes}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                            <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Ellipse Width="{Binding Diameter}"
+                                     Height="{Binding Diameter}"
+                                     Fill="{Binding Fill}"
+                                     Opacity="{Binding Opacity}"
+                                     ToolTip="{Binding DisplayLabel}">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Stroke" Value="{Binding StrokeBrush}" />
+                                        <Setter Property="StrokeThickness" Value="{Binding StrokeThicknessValue}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsDropTarget}" Value="True">
+                                                <Setter Property="Stroke" Value="#3B82F6" />
+                                                <Setter Property="StrokeThickness" Value="3" />
+                                                <Setter Property="StrokeDashArray" Value="3 2" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
         </Canvas>
 
-        <!-- 색상 팔레트 팝업 (우클릭 시 열림) -->
+        <!-- 미니맵 오버레이 (우하단) -->
+        <Border x:Name="MinimapPanel"
+                Width="200" Height="140"
+                HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="12"
+                Background="#CC0F172A" BorderBrush="#334155" BorderThickness="1"
+                CornerRadius="6"
+                Visibility="{Binding ShowMinimap, Converter={StaticResource BoolToVis}}">
+            <Grid>
+                <Rectangle x:Name="MinimapContent"
+                           Margin="3"
+                           MouseLeftButtonDown="Minimap_MouseLeftButtonDown"
+                           MouseMove="Minimap_MouseMove"
+                           MouseLeftButtonUp="Minimap_MouseLeftButtonUp"
+                           Cursor="Hand">
+                    <Rectangle.Fill>
+                        <VisualBrush Visual="{Binding ElementName=GraphLayer}" Stretch="Uniform" />
+                    </Rectangle.Fill>
+                </Rectangle>
+                <!-- 현재 보이는 영역 표시 -->
+                <Canvas IsHitTestVisible="False" Margin="3">
+                    <Rectangle x:Name="MinimapViewport"
+                               Stroke="#38BDF8" StrokeThickness="1.5"
+                               Fill="#3338BDF8" />
+                </Canvas>
+
+                <!-- 닫기 버튼 -->
+                <Button Content="✕"
+                        Width="18" Height="18"
+                        Padding="0"
+                        HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Margin="0,2,2,0"
+                        Foreground="#CBD5E1"
+                        Background="#1E293B"
+                        BorderBrush="#334155"
+                        ToolTip="미니맵 닫기"
+                        Command="{Binding ToggleMinimapCommand}" />
+            </Grid>
+        </Border>
+
+        <!-- 색상 팔레트 팝업 -->
         <Popup x:Name="PalettePopup"
                Placement="Relative"
                PlacementTarget="{Binding ElementName=Viewport}"
@@ -128,14 +179,9 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
-
-                    <!-- 회색으로 초기화 -->
                     <Button Content="회색으로 초기화"
-                            Margin="3,6,3,2"
-                            Padding="6,4"
-                            Foreground="#CBD5E1"
-                            Background="#0F172A"
-                            BorderBrush="#334155"
+                            Margin="3,6,3,2" Padding="6,4"
+                            Foreground="#CBD5E1" Background="#0F172A" BorderBrush="#334155"
                             Command="{Binding ResetColorCommand}" />
                 </StackPanel>
             </Border>

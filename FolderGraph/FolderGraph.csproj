@@ -172,6 +172,7 @@
     <Compile Include="Graph\ForceDirectedSimulation.cs" />
     <Compile Include="Graph\GraphEdge.cs" />
     <Compile Include="Graph\GraphNode.cs" />
+    <Compile Include="Graph\GridForceSimulation.cs" />
     <Compile Include="Graph\SimpleGridLayout.cs" />
     <Compile Include="Helpers\Abstractions\INodeColorCalculator.cs" />
     <Compile Include="Helpers\AppConstants.cs" />

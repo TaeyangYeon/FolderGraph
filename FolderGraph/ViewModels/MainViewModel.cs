@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
@@ -26,6 +27,8 @@ namespace FolderGraph.ViewModels
         private readonly IGraphLayoutEngine _layout;
         private readonly IForceDirectedSimulation _simulation;
         private readonly INodeColorCalculator _colorCalculator;
+        private readonly IFileOperationService _fileOps;
+        private readonly IDialogService _dialog;
         private readonly DispatcherTimer _simTimer;
         private readonly DispatcherTimer _depthDebounce;
 
@@ -38,6 +41,12 @@ namespace FolderGraph.ViewModels
         private bool _hasLoaded;
         private NodeViewModel _selectedNode;
 
+        // 검색 / 하이라이트 모드
+        private string _searchText;
+        private int _matchCount;
+        private HighlightMode _highlightMode = HighlightMode.None;
+        private readonly DispatcherTimer _searchDebounce;
+
         // 색상 팔레트 상태
         private NodeViewModel _colorTargetNode;
         private bool _isPaletteOpen;
@@ -47,20 +56,29 @@ namespace FolderGraph.ViewModels
         private const double DimOpacity = 0.22;
         private const double DimEdgeOpacity = 0.10;
 
+        /// <summary>현재 하이라이트 소스. 선택과 검색은 상호 배타적이며 마지막 이벤트가 이긴다.</summary>
+        private enum HighlightMode { None, Selection, Search }
+
         public MainViewModel(IFolderScanner scanner,
                              IGraphLayoutEngine layout,
                              IForceDirectedSimulation simulation,
-                             INodeColorCalculator colorCalculator)
+                             INodeColorCalculator colorCalculator,
+                             IFileOperationService fileOps,
+                             IDialogService dialog)
         {
             if (scanner == null) throw new ArgumentNullException("scanner");
             if (layout == null) throw new ArgumentNullException("layout");
             if (simulation == null) throw new ArgumentNullException("simulation");
             if (colorCalculator == null) throw new ArgumentNullException("colorCalculator");
+            if (fileOps == null) throw new ArgumentNullException("fileOps");
+            if (dialog == null) throw new ArgumentNullException("dialog");
 
             _scanner = scanner;
             _layout = layout;
             _simulation = simulation;
             _colorCalculator = colorCalculator;
+            _fileOps = fileOps;
+            _dialog = dialog;
 
             _depth = 3;
             _includeHidden = false;
@@ -80,9 +98,17 @@ namespace FolderGraph.ViewModels
             _depthDebounce.Interval = TimeSpan.FromMilliseconds(300);
             _depthDebounce.Tick += OnDepthDebounceTick;
 
+            // 검색 디바운스(100ms)
+            _searchDebounce = new DispatcherTimer();
+            _searchDebounce.Interval = TimeSpan.FromMilliseconds(100);
+            _searchDebounce.Tick += OnSearchDebounceTick;
+
             LoadCommand = new RelayCommand(async () => await LoadAsync(false), CanLoad);
             PickColorCommand = new RelayCommand<PaletteColor>(OnPickColor);
             ResetColorCommand = new RelayCommand(OnResetColor);
+            ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty);
+            ToggleMinimapCommand = new RelayCommand(() => ShowMinimap = !ShowMinimap);
+            ExportImageCommand = new RelayCommand(OnExportImage);
         }
 
         private static Brush MakeFrozenGray()
@@ -123,7 +149,42 @@ namespace FolderGraph.ViewModels
         public bool IncludeHidden
         {
             get { return _includeHidden; }
-            set { SetProperty(ref _includeHidden, value); }
+            set
+            {
+                if (SetProperty(ref _includeHidden, value) && _hasLoaded)
+                {
+                    // 체크 즉시 재스캔(위치 보존). fire-and-forget(이전 스캔은 내부에서 취소).
+                    _ = LoadAsync(true);
+                }
+            }
+        }
+
+        public string SearchText
+        {
+            get { return _searchText; }
+            set
+            {
+                if (SetProperty(ref _searchText, value))
+                {
+                    OnPropertyChanged("HasSearchText");
+                    // 입력 즉시가 아니라 100ms 디바운스 후 적용
+                    _searchDebounce.Stop();
+                    _searchDebounce.Start();
+                }
+            }
+        }
+
+        /// <summary>현재 검색어에 매칭된 노드 수.</summary>
+        public int MatchCount
+        {
+            get { return _matchCount; }
+            set { SetProperty(ref _matchCount, value); }
+        }
+
+        /// <summary>검색어가 비어있지 않은지(매칭 수 표시 여부).</summary>
+        public bool HasSearchText
+        {
+            get { return !string.IsNullOrEmpty(_searchText); }
         }
 
         public bool IsBusy
@@ -144,6 +205,20 @@ namespace FolderGraph.ViewModels
         public ICommand LoadCommand { get; private set; }
         public ICommand PickColorCommand { get; private set; }
         public ICommand ResetColorCommand { get; private set; }
+        public ICommand ClearSearchCommand { get; private set; }
+        public ICommand ToggleMinimapCommand { get; private set; }
+        public ICommand ExportImageCommand { get; private set; }
+
+        /// <summary>PNG 내보내기 요청. View가 구독해 실제 렌더링/저장을 수행한다.</summary>
+        public event EventHandler ExportImageRequested;
+
+        private bool _showMinimap;
+        /// <summary>미니맵 표시 여부.</summary>
+        public bool ShowMinimap
+        {
+            get { return _showMinimap; }
+            set { SetProperty(ref _showMinimap, value); }
+        }
 
         /// <summary>우클릭 팔레트에 표시할 기준 색 목록.</summary>
         public IReadOnlyList<PaletteColor> PaletteColors { get; private set; }
@@ -181,6 +256,9 @@ namespace FolderGraph.ViewModels
 
                 BuildGraph(data, preservePositions);
                 _hasLoaded = true;
+
+                // 재스캔으로 노드가 새로 생성되었으므로, 검색어가 있으면 다시 적용
+                ApplySearchOrClear();
 
                 StatusText = data.TruncatedByLimit
                     ? string.Format("노드 {0}개 (최대치 {1} 도달로 일부 생략)",
@@ -233,14 +311,18 @@ namespace FolderGraph.ViewModels
                             X = old.X,
                             Y = old.Y,
                             IsPinned = old.IsPinned,
-                            Fill = old.Fill
+                            Fill = old.Fill,
+                            IsColored = old.IsColored,
+                            ColorBase = old.ColorBase,
+                            ColorDepth = old.ColorDepth
                         };
                     }
                 }
             }
 
-            // 선택 상태는 재구성 시 해제
+            // 선택/하이라이트 상태는 재구성 시 해제(이후 LoadAsync에서 검색 재적용)
             _selectedNode = null;
+            _highlightMode = HighlightMode.None;
 
             Nodes.Clear();
             Edges.Clear();
@@ -272,6 +354,9 @@ namespace FolderGraph.ViewModels
                         vm.Y = s.Y;
                         vm.IsPinned = s.IsPinned;
                         vm.Fill = s.Fill;
+                        vm.IsColored = s.IsColored;
+                        vm.ColorBase = s.ColorBase;
+                        vm.ColorDepth = s.ColorDepth;
                     }
                 }
             }
@@ -337,11 +422,30 @@ namespace FolderGraph.ViewModels
             }
         }
 
-        // ── 선택 / 하이라이트 ────────────────────────
+        /// <summary>
+        /// 시뮬레이션을 즉시 멈춘다. 노드를 드래그하는 동안 다른 노드가 들썩이지 않게 하여
+        /// 대상 폴더가 도망가지 않도록 한다(드롭 후 ReheatSimulation으로 다시 정리).
+        /// </summary>
+        public void PauseSimulation()
+        {
+            _simTimer.Stop();
+        }
+
+        /// <summary>PNG 내보내기 요청을 View로 전달한다(렌더링은 View가 수행).</summary>
+        private void OnExportImage()
+        {
+            var handler = ExportImageRequested;
+            if (handler != null)
+            {
+                handler(this, EventArgs.Empty);
+            }
+        }
+
+        // ── 선택 / 검색 하이라이트 (마지막 이벤트 우선) ──
 
         /// <summary>
-        /// 노드를 선택한다. 그 노드와 모든 하위 자손을 강조하고,
-        /// 나머지 노드/엣지는 흐리게 처리한다.
+        /// 노드를 선택한다(클릭). 선택 모드로 전환하며, 그 노드와 모든 하위 자손을
+        /// 강조하고 나머지는 흐리게 한다. 검색 하이라이트가 있었다면 덮어쓴다.
         /// </summary>
         public void SelectNode(NodeViewModel node)
         {
@@ -351,6 +455,7 @@ namespace FolderGraph.ViewModels
                 return;
             }
 
+            _highlightMode = HighlightMode.Selection;
             _selectedNode = node;
 
             // 선택 노드 + 모든 하위 자손 수집
@@ -382,9 +487,27 @@ namespace FolderGraph.ViewModels
             }
         }
 
-        /// <summary>선택을 해제하고 모든 강조/흐림을 원래대로 되돌린다.</summary>
+        /// <summary>
+        /// 빈 캔버스 클릭 시 호출. 선택을 해제하되, 검색어가 남아 있으면
+        /// 검색 하이라이트로 복귀하고, 없으면 완전히 해제한다.
+        /// </summary>
         public void ClearSelection()
         {
+            string q = (_searchText ?? string.Empty).Trim();
+            if (q.Length > 0)
+            {
+                ApplySearch(q); // 검색 하이라이트로 복귀
+            }
+            else
+            {
+                ClearAllHighlight();
+            }
+        }
+
+        /// <summary>모든 강조/흐림을 원래대로 되돌린다(하이라이트 없음).</summary>
+        private void ClearAllHighlight()
+        {
+            _highlightMode = HighlightMode.None;
             _selectedNode = null;
 
             foreach (NodeViewModel n in Nodes)
@@ -398,6 +521,68 @@ namespace FolderGraph.ViewModels
             {
                 ed.Opacity = 1.0;
             }
+        }
+
+        private void OnSearchDebounceTick(object sender, EventArgs e)
+        {
+            _searchDebounce.Stop();
+            ApplySearchOrClear();
+        }
+
+        /// <summary>검색어가 있으면 검색 하이라이트, 없으면(검색 모드였다면) 해제.</summary>
+        private void ApplySearchOrClear()
+        {
+            string q = (_searchText ?? string.Empty).Trim();
+            if (q.Length == 0)
+            {
+                MatchCount = 0;
+                // 검색으로 켜둔 하이라이트만 끈다(선택 모드면 건드리지 않음).
+                if (_highlightMode == HighlightMode.Search)
+                {
+                    ClearAllHighlight();
+                }
+                return;
+            }
+            ApplySearch(q);
+        }
+
+        /// <summary>
+        /// 검색 하이라이트를 적용한다. 매칭된 노드 "자기 자신만" 강조하고(자손 미포함),
+        /// 나머지 노드와 모든 엣지는 흐리게 한다. 검색 모드로 전환된다.
+        /// </summary>
+        private void ApplySearch(string query)
+        {
+            _highlightMode = HighlightMode.Search;
+            _selectedNode = null;
+
+            int count = 0;
+            foreach (NodeViewModel n in Nodes)
+            {
+                bool match = n.Name != null &&
+                             n.Name.IndexOf(query, StringComparison.OrdinalIgnoreCase) >= 0;
+                n.IsHighlighted = match;
+                n.IsSelected = false;
+
+                if (match)
+                {
+                    n.ApplySearchStyle();
+                    n.Opacity = 1.0;
+                    count++;
+                }
+                else
+                {
+                    n.ResetStyle();
+                    n.Opacity = DimOpacity;
+                }
+            }
+
+            // 매칭은 노드 자신만이므로 엣지는 모두 흐리게
+            foreach (EdgeViewModel ed in Edges)
+            {
+                ed.Opacity = DimEdgeOpacity;
+            }
+
+            MatchCount = count;
         }
 
         private void CollectSubtree(NodeViewModel root, HashSet<NodeViewModel> set)
@@ -465,6 +650,10 @@ namespace FolderGraph.ViewModels
                 var brush = new SolidColorBrush(shade);
                 brush.Freeze();
                 nd.Node.Fill = brush;
+                // 색 상태 저장(이동 시 자손 색 재지정/스냅샷 복원에 사용)
+                nd.Node.IsColored = true;
+                nd.Node.ColorBase = baseColor;
+                nd.Node.ColorDepth = nd.Depth;
 
                 foreach (NodeViewModel child in nd.Node.Children)
                 {
@@ -481,7 +670,152 @@ namespace FolderGraph.ViewModels
             foreach (NodeViewModel n in set)
             {
                 n.Fill = GrayBrush;
+                n.IsColored = false;
             }
+        }
+
+        // ── 파일 열기 / 이동 ─────────────────────────
+
+        /// <summary>파일 노드를 OS 기본 앱으로 연다(더블클릭).</summary>
+        public void OpenFile(NodeViewModel node)
+        {
+            if (node == null || node.Type != NodeType.File)
+            {
+                return; // 폴더는 열지 않음
+            }
+            try
+            {
+                _fileOps.OpenWithDefaultApp(node.FullPath);
+            }
+            catch (Exception ex)
+            {
+                _dialog.ShowError("파일을 열 수 없습니다.\n" + ex.Message, "오류");
+            }
+        }
+
+        /// <summary>
+        /// 노드를 대상 폴더로 이동한다(드래그→폴더 드롭).
+        /// 확인 팝업 → 실제 이동 → 재스캔 → 새 부모 기준 색 재지정 순서.
+        /// </summary>
+        public async void RequestMoveAsync(NodeViewModel dragged, NodeViewModel targetFolder)
+        {
+            if (dragged == null || targetFolder == null || dragged == targetFolder)
+            {
+                return;
+            }
+
+            // 자기 자신/자손으로는 이동 불가(폴더를 자기 하위로)
+            var sub = new HashSet<NodeViewModel>();
+            CollectSubtree(dragged, sub);
+            if (sub.Contains(targetFolder))
+            {
+                return;
+            }
+
+            // 이미 그 폴더 안에 있으면(동일 폴더) 무시
+            string sourceParent = Path.GetDirectoryName(dragged.FullPath);
+            if (string.Equals(sourceParent, targetFolder.FullPath,
+                              StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            string name = dragged.Name;
+            bool isFolder = dragged.Type == NodeType.Folder;
+            string targetPath = targetFolder.FullPath;
+
+            // 확인 팝업
+            string message = string.Format("'{0}'을(를)\n'{1}'(으)로 이동하시겠습니까?",
+                                            name, targetFolder.Name);
+            if (!_dialog.Confirm(message, "파일 이동"))
+            {
+                return;
+            }
+
+            // 실제 이동
+            try
+            {
+                _fileOps.Move(dragged.FullPath, targetPath, isFolder);
+            }
+            catch (Exception ex)
+            {
+                _dialog.ShowError("이동에 실패했습니다.\n" + ex.Message, "오류");
+                return; // 그래프 상태 그대로 유지
+            }
+
+            // 성공 → 위치 보존 재스캔
+            await LoadAsync(true);
+
+            // 이동한 노드를 새 경로로 찾아 새 부모 기준 색 재지정 + 위치 정돈
+            string newPath = Path.Combine(targetPath, name);
+            NodeViewModel movedNode = FindByPath(newPath);
+            NodeViewModel newParent = FindByPath(targetPath);
+
+            if (movedNode != null)
+            {
+                RecolorMovedSubtree(movedNode, newParent);
+                if (newParent != null)
+                {
+                    movedNode.X = newParent.X + 30;
+                    movedNode.Y = newParent.Y + 30;
+                }
+                ReheatSimulation();
+            }
+
+            StatusText = string.Format("'{0}' 이동 완료", name);
+        }
+
+        /// <summary>
+        /// 이동한 노드 서브트리를 새 부모의 색 계열로 칠한다.
+        /// 새 부모가 색칠돼 있으면 그 기준색 + (부모 깊이+1)부터의 명도, 회색이면 그대로 둔다.
+        /// </summary>
+        private void RecolorMovedSubtree(NodeViewModel moved, NodeViewModel newParent)
+        {
+            if (newParent == null || !newParent.IsColored)
+            {
+                return; // 새 부모가 회색이면 이동 노드도 회색(재스캔 기본값 유지)
+            }
+
+            Color baseColor = newParent.ColorBase;
+            int startDepth = newParent.ColorDepth + 1;
+
+            var queue = new Queue<NodeDepth>();
+            var visited = new HashSet<NodeViewModel>();
+            queue.Enqueue(new NodeDepth(moved, startDepth));
+
+            while (queue.Count > 0)
+            {
+                NodeDepth nd = queue.Dequeue();
+                if (!visited.Add(nd.Node))
+                {
+                    continue;
+                }
+
+                Color shade = _colorCalculator.GetShade(baseColor, nd.Depth);
+                var brush = new SolidColorBrush(shade);
+                brush.Freeze();
+                nd.Node.Fill = brush;
+                nd.Node.IsColored = true;
+                nd.Node.ColorBase = baseColor;
+                nd.Node.ColorDepth = nd.Depth;
+
+                foreach (NodeViewModel child in nd.Node.Children)
+                {
+                    queue.Enqueue(new NodeDepth(child, nd.Depth + 1));
+                }
+            }
+        }
+
+        private NodeViewModel FindByPath(string fullPath)
+        {
+            foreach (NodeViewModel n in Nodes)
+            {
+                if (string.Equals(n.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return n;
+                }
+            }
+            return null;
         }
 
         private static IReadOnlyList<PaletteColor> BuildPalette()
@@ -528,6 +862,9 @@ namespace FolderGraph.ViewModels
             public double Y;
             public bool IsPinned;
             public System.Windows.Media.Brush Fill;
+            public bool IsColored;
+            public Color ColorBase;
+            public int ColorDepth;
         }
     }
 }

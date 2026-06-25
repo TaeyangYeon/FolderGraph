@@ -104,7 +104,6 @@ D:\YEON\PRAC\FolderGraph\FolderGraph\bin\Debug\MahApps.Metro.IconPacks.Zondicons
 D:\YEON\PRAC\FolderGraph\FolderGraph\bin\Debug\Microsoft.Xaml.Behaviors.pdb
 D:\YEON\PRAC\FolderGraph\FolderGraph\bin\Debug\Microsoft.Xaml.Behaviors.xml
 D:\YEON\PRAC\FolderGraph\FolderGraph\bin\Debug\de\MahApps.Metro.resources.dll
-D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.csprojAssemblyReference.cache
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\MainWindow.g.cs
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\Views\GraphCanvasView.g.cs
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\Views\ToolbarView.g.cs
@@ -124,3 +123,4 @@ D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.pdb
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\GeneratedInternalTypeHelper.g.cs
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\App.baml
 D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\Resources\Styles.baml
+D:\YEON\PRAC\FolderGraph\FolderGraph\obj\Debug\FolderGraph.csprojAssemblyReference.cache
