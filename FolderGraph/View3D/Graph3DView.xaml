@@ -12,6 +12,7 @@
           MouseDown="Root_MouseDown"
           MouseUp="Root_MouseUp"
           MouseMove="Root_MouseMove"
+          MouseLeave="Root_MouseLeave"
           MouseWheel="Root_MouseWheel">
 
         <Viewport3D x:Name="Viewport">
@@ -44,6 +45,16 @@
         <TextBlock Foreground="#5A6B86" FontSize="11"
                    HorizontalAlignment="Left" VerticalAlignment="Bottom"
                    Margin="10"
-                   Text="좌클릭 드래그: 회전   |   휠 클릭 드래그: 이동   |   휠: 줌" />
+                   Text="좌클릭 드래그: 회전   |   휠 클릭 드래그: 이동   |   휠: 줌   |   클릭: 선택   |   더블클릭: 열기" />
+
+        <!-- 호버 툴팁(노드 이름) -->
+        <Border x:Name="HoverTip"
+                HorizontalAlignment="Left" VerticalAlignment="Top"
+                Background="#E60F172A" BorderBrush="#334155" BorderThickness="1"
+                CornerRadius="4" Padding="6,3"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+            <TextBlock x:Name="HoverTipText" Foreground="#E2E8F0" FontSize="12" />
+        </Border>
     </Grid>
 </UserControl>

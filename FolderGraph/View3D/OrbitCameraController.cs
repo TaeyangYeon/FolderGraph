@@ -37,6 +37,75 @@ namespace FolderGraph.View3D
         public PerspectiveCamera Camera { get { return _camera; } }
         public Point3D Target { get { return _target; } }
         public double Distance { get { return _distance; } }
+        public Point3D Position { get { return _camera.Position; } }
+
+        /// <summary>카메라가 바라보는 방향(정규화).</summary>
+        public Vector3D Forward
+        {
+            get
+            {
+                Vector3D f = _camera.LookDirection;
+                f.Normalize();
+                return f;
+            }
+        }
+
+        /// <summary>
+        /// 화면 좌표(px)와 뷰포트 크기로부터, 카메라에서 그 픽셀을 지나는 광선이
+        /// 지정한 평면(점 planePoint, 법선 planeNormal)과 만나는 3D 지점을 구한다.
+        /// 노드를 화면에 평행한 평면 위에서 끌 때 사용.
+        /// </summary>
+        public bool ScreenToPlane(double screenX, double screenY,
+                                  double viewportWidth, double viewportHeight,
+                                  Point3D planePoint, Vector3D planeNormal,
+                                  out Point3D hit)
+        {
+            hit = planePoint;
+            if (viewportWidth <= 0 || viewportHeight <= 0)
+            {
+                return false;
+            }
+
+            // 정규화 화면 좌표(-1..1), 위쪽이 +가 되도록 y 뒤집기
+            double nx = (2.0 * screenX / viewportWidth) - 1.0;
+            double ny = 1.0 - (2.0 * screenY / viewportHeight);
+
+            // 카메라 기저
+            Vector3D forward = Forward;
+            Vector3D up = _camera.UpDirection;
+            up.Normalize();
+            Vector3D right = Vector3D.CrossProduct(forward, up);
+            right.Normalize();
+            Vector3D trueUp = Vector3D.CrossProduct(right, forward);
+            trueUp.Normalize();
+
+            // 수직 FOV로 화면 반높이/반너비 비율
+            double fovY = _camera.FieldOfView * Math.PI / 180.0;
+            double aspect = viewportWidth / viewportHeight;
+            double tanHalf = Math.Tan(fovY / 2.0);
+
+            // 카메라에서 픽셀 방향 광선
+            Vector3D dir = forward
+                           + right * (nx * tanHalf * aspect)
+                           + trueUp * (ny * tanHalf);
+            dir.Normalize();
+
+            Point3D origin = _camera.Position;
+
+            // 광선-평면 교차
+            double denom = Vector3D.DotProduct(planeNormal, dir);
+            if (Math.Abs(denom) < 1e-9)
+            {
+                return false; // 평행
+            }
+            double t = Vector3D.DotProduct(planeNormal, (planePoint - origin)) / denom;
+            if (t < 0)
+            {
+                return false; // 카메라 뒤쪽
+            }
+            hit = origin + dir * t;
+            return true;
+        }
 
         /// <summary>회전: 마우스 이동량(px)에 비례해 방위각/고도각을 바꾼다.</summary>
         public void Orbit(double deltaX, double deltaY)
