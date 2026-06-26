@@ -247,7 +247,7 @@ namespace FolderGraph.ViewModels
             return !_isBusy && !string.IsNullOrWhiteSpace(_rootPath);
         }
 
-        private async Task LoadAsync(bool preservePositions)
+        private async Task LoadAsync(bool preservePositions, bool freshLayout = false)
         {
             if (_cts != null)
             {
@@ -264,7 +264,7 @@ namespace FolderGraph.ViewModels
                 GraphData data = await _scanner.ScanAsync(
                     _rootPath, _depth, _includeHidden, _cts.Token);
 
-                BuildGraph(data, preservePositions);
+                BuildGraph(data, preservePositions, freshLayout);
                 _hasLoaded = true;
 
                 // 재스캔으로 노드가 새로 생성되었으므로, 검색어가 있으면 다시 적용
@@ -295,7 +295,8 @@ namespace FolderGraph.ViewModels
             _depthDebounce.Stop();
             if (_hasLoaded && !string.IsNullOrWhiteSpace(_rootPath))
             {
-                await LoadAsync(true); // 깊이 변경 → 위치 보존 재스캔
+                // 깊이 변경 → 색/선택은 보존하되 위치는 새로 배치(중앙 모음 + 프리워밍)
+                await LoadAsync(true, true);
             }
         }
 
@@ -303,7 +304,7 @@ namespace FolderGraph.ViewModels
         /// 스캔 결과로부터 NodeViewModel/EdgeViewModel을 만들고,
         /// 힘-기반 시뮬레이션을 초기화한 뒤 애니메이션을 시작한다.
         /// </summary>
-        private void BuildGraph(GraphData data, bool preservePositions)
+        private void BuildGraph(GraphData data, bool preservePositions, bool freshLayout = false)
         {
             // 진행 중 시뮬레이션 정지
             _simTimer.Stop();
@@ -353,17 +354,39 @@ namespace FolderGraph.ViewModels
             double area = Math.Max(600, Math.Sqrt(nodeList.Count) * 90);
             _layout.Arrange(nodeList, area, area);
 
-            // 3D 입체감: 깊이에 따라 Z를 분산(물리 3축 확장 전 임시 분포).
-            // 같은 깊이라도 약간씩 흩어지게 해 평면이 아닌 공간감을 준다.
-            var zrnd = new Random(20240624);
-            foreach (NodeViewModel vm in nodeList)
+            double cx = area / 2.0;
+            double cy = area / 2.0;
+
+            // 위치를 새로 깔지 여부: 신규 로드이거나 깊이 변경(freshLayout)일 때.
+            bool layoutFresh = !preservePositions || freshLayout;
+
+            if (layoutFresh)
             {
-                double layer = vm.Depth * 140.0;                 // 깊이별 층
-                double jitter = (zrnd.NextDouble() - 0.5) * 120.0; // 층 내 흩뜨림
-                vm.Z = layer + jitter;
+                // 중심 근처 작은 구 안에 모아둔다(가운데로 뭉치며 빨리 수렴).
+                // 깊이가 얕을수록 더 중심에 가깝게 두어 부모-자식 군집이 드러나게 한다.
+                var srnd = new Random(20240624);
+                foreach (NodeViewModel vm in nodeList)
+                {
+                    double spread = 40.0 + vm.Depth * 25.0; // 깊을수록 살짝 바깥
+                    vm.X = cx + (srnd.NextDouble() - 0.5) * spread;
+                    vm.Y = cy + (srnd.NextDouble() - 0.5) * spread;
+                    vm.Z = (srnd.NextDouble() - 0.5) * spread;
+                }
+            }
+            else
+            {
+                // 재스캔: 3D 입체감용 깊이 기반 Z 시드(보존 대상은 아래에서 덮어씀)
+                var zrnd = new Random(20240624);
+                foreach (NodeViewModel vm in nodeList)
+                {
+                    double layer = vm.Depth * 140.0;
+                    double jitter = (zrnd.NextDouble() - 0.5) * 120.0;
+                    vm.Z = layer + jitter;
+                }
             }
 
-            // 보존 대상은 기존 좌표로 덮어쓰기(새 노드는 시드 좌표 유지)
+            // 보존 대상 복원. freshLayout이면 위치(X/Y/Z)는 새로 깐 값을 유지하고
+            // 색/선택 상태만 복원한다. 그 외 보존 모드는 위치까지 복원.
             if (preservePositions)
             {
                 foreach (NodeViewModel vm in nodeList)
@@ -371,10 +394,13 @@ namespace FolderGraph.ViewModels
                     NodeSnapshot s;
                     if (snapshot.TryGetValue(vm.FullPath, out s))
                     {
-                        vm.X = s.X;
-                        vm.Y = s.Y;
-                        vm.Z = s.Z;
-                        vm.IsPinned = s.IsPinned;
+                        if (!freshLayout)
+                        {
+                            vm.X = s.X;
+                            vm.Y = s.Y;
+                            vm.Z = s.Z;
+                            vm.IsPinned = s.IsPinned;
+                        }
                         vm.Fill = s.Fill;
                         vm.IsColored = s.IsColored;
                         vm.ColorBase = s.ColorBase;
@@ -403,6 +429,33 @@ namespace FolderGraph.ViewModels
             }
             Edges.Reset(edgeList);
 
+            // 신규 로드: 최상위(depth 0) 폴더들에 팔레트 순서대로 색을 미리 부여(자식까지).
+            // (깊이 변경 재스캔은 보존된 색을 그대로 사용)
+            if (!preservePositions)
+            {
+                int ci = 0;
+                int paletteCount = PaletteColors != null ? PaletteColors.Count : 0;
+                if (paletteCount > 0)
+                {
+                    foreach (NodeViewModel n in nodeList)
+                    {
+                        if (n.Depth == 0 && n.Type == NodeType.Folder)
+                        {
+                            PaletteColor pc = PaletteColors[ci % paletteCount];
+                            ApplyColorToSubtree(n, pc.Color);
+                            ci++;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // 깊이 변경 등 보존 재스캔: 색은 스냅샷으로 복원했지만, 깊이를 늘려
+                // 새로 나타난 자식은 스냅샷에 없어 회색으로 남는다.
+                // 부모는 색칠됐는데 자식이 색이 없으면 부모 색 계열을 이어 칠한다.
+                PropagateColorToNewChildren(nodeList);
+            }
+
             // 시뮬레이션 초기화 후 시작
             if (nodeList.Count > 0)
             {
@@ -412,11 +465,32 @@ namespace FolderGraph.ViewModels
                     bodies.Add(vm);
                 }
 
-                double cx = area / 2.0;
-                double cy = area / 2.0;
-                // 위치 보존이면 낮은 에너지로 시작(기존 배치 유지), 신규면 완전 확산
-                double energy = preservePositions ? 0.12 : 1.0;
+                // 위치를 새로 깐 경우(신규/깊이변경)는 완전 확산, 단순 보존이면 약하게 데움
+                double energy = layoutFresh ? 1.0 : 0.12;
                 _simulation.Initialize(bodies, links, cx, cy, energy);
+
+                // 위치를 새로 깐 경우: 표시 전에 시뮬레이션을 미리 돌려 수렴시킨다
+                // (처음부터 중심으로 모인 정돈된 배치가 보이도록).
+                // 노드가 많으면 O(n^2) 프리워밍이 부담이라 횟수를 줄인다.
+                if (layoutFresh)
+                {
+                    int n = nodeList.Count;
+                    int prewarm;
+                    if (n > 3000) prewarm = 60;
+                    else if (n > 1500) prewarm = 100;
+                    else if (n > 600) prewarm = 160;
+                    else prewarm = 220;
+
+                    for (int i = 0; i < prewarm; i++)
+                    {
+                        _simulation.Step();
+                    }
+                    foreach (NodeViewModel vm in nodeList)
+                    {
+                        vm.NotifyPositionChanged();
+                    }
+                }
+
                 _simTimer.Start();
             }
 
@@ -682,6 +756,78 @@ namespace FolderGraph.ViewModels
                 nd.Node.ColorBase = baseColor;
                 nd.Node.ColorDepth = nd.Depth;
                 nd.Node.ColorRootName = root.Name;   // 색칠 출발점 이름(집계용)
+
+                foreach (NodeViewModel child in nd.Node.Children)
+                {
+                    queue.Enqueue(new NodeDepth(child, nd.Depth + 1));
+                }
+            }
+        }
+
+        /// <summary>
+        /// 보존 재스캔 후, 색칠된 부모 밑에 새로 생겨 회색으로 남은 자식들을
+        /// 부모의 색 계열(기준색 + 부모 깊이+1 명도)로 이어 칠한다.
+        /// 루트부터 내려가며 색이 끊긴 지점부터 서브트리 전체를 칠한다.
+        /// </summary>
+        private void PropagateColorToNewChildren(List<NodeViewModel> nodeList)
+        {
+            // depth 0(최상위)부터 시작해 부모→자식으로 전파
+            var queue = new Queue<NodeViewModel>();
+            foreach (NodeViewModel n in nodeList)
+            {
+                if (n.Depth == 0)
+                {
+                    queue.Enqueue(n);
+                }
+            }
+
+            var visited = new HashSet<NodeViewModel>();
+            while (queue.Count > 0)
+            {
+                NodeViewModel parent = queue.Dequeue();
+                if (!visited.Add(parent))
+                {
+                    continue;
+                }
+
+                foreach (NodeViewModel child in parent.Children)
+                {
+                    // 부모는 색칠됐는데 자식이 색이 없으면 → 부모 색을 이어 칠한다(자손까지)
+                    if (parent.IsColored && !child.IsColored)
+                    {
+                        Color baseColor = parent.ColorBase;
+                        string rootName = !string.IsNullOrEmpty(parent.ColorRootName)
+                            ? parent.ColorRootName : parent.Name;
+                        ColorChildSubtree(child, baseColor, parent.ColorDepth + 1, rootName);
+                    }
+                    queue.Enqueue(child);
+                }
+            }
+        }
+
+        /// <summary>특정 노드와 그 자손을 주어진 기준색/시작깊이로 칠한다(이름은 루트 이름 사용).</summary>
+        private void ColorChildSubtree(NodeViewModel start, Color baseColor, int startDepth, string rootName)
+        {
+            var queue = new Queue<NodeDepth>();
+            var visited = new HashSet<NodeViewModel>();
+            queue.Enqueue(new NodeDepth(start, startDepth));
+
+            while (queue.Count > 0)
+            {
+                NodeDepth nd = queue.Dequeue();
+                if (!visited.Add(nd.Node))
+                {
+                    continue;
+                }
+
+                Color shade = _colorCalculator.GetShade(baseColor, nd.Depth);
+                var brush = new SolidColorBrush(shade);
+                brush.Freeze();
+                nd.Node.Fill = brush;
+                nd.Node.IsColored = true;
+                nd.Node.ColorBase = baseColor;
+                nd.Node.ColorDepth = nd.Depth;
+                nd.Node.ColorRootName = rootName;
 
                 foreach (NodeViewModel child in nd.Node.Children)
                 {

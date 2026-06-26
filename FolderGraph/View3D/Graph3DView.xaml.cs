@@ -126,6 +126,12 @@ namespace FolderGraph.View3D
             _hoveredNode = null;
             HoverTip.Visibility = Visibility.Collapsed;
             RebuildNodes();
+
+            // 노드가 새로 채워지면(불러오기/재스캔) 카메라를 노드 무리 중앙으로 맞춘다.
+            // 위치/레이아웃이 반영된 다음 프레임에 맞추기 위해 Dispatcher로 한 박자 미룬다.
+            Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Loaded,
+                new Action(FitCameraToGraph));
         }
 
         private void OnEdgesChanged(object sender, NotifyCollectionChangedEventArgs e)
