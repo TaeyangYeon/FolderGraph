@@ -123,6 +123,8 @@ FolderGraph/
 
 ---
 
+<img width="982" height="532" alt="Image" src="https://github.com/user-attachments/assets/30a8aedb-a9d1-41ba-887e-1fe2d65d8bfd" />
+
 ## 동작 원리
 
 ### 렌더링
