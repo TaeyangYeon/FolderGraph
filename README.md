@@ -6,7 +6,7 @@
 탐색할 수 있습니다.
 
 ---
-<img src="resource/Load.png">
+<img width="1920" height="1040" alt="Image" src="https://github.com/user-attachments/assets/84ab17bb-139f-4dea-aeba-9ac0e17e94e2" />
 
 ## 주요 기능
 
