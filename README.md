@@ -45,6 +45,8 @@
 
 ---
 
+<img width="1920" height="1040" alt="Image" src="https://github.com/user-attachments/assets/1479e19e-4d8a-4707-b6d2-7fd7434ac061" />
+
 ## 기술 스택
 
 - **언어/런타임**: C# 7.3, .NET Framework 4.7.2
