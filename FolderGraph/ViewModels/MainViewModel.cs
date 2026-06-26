@@ -84,8 +84,9 @@ namespace FolderGraph.ViewModels
             _includeHidden = false;
             _statusText = "폴더 경로를 입력하고 불러오기를 누르세요.";
 
-            Nodes = new ObservableCollection<NodeViewModel>();
-            Edges = new ObservableCollection<EdgeViewModel>();
+            Nodes = new BulkObservableCollection<NodeViewModel>();
+            Edges = new BulkObservableCollection<EdgeViewModel>();
+            ColorStats = new ObservableCollection<ColorStat>();
             PaletteColors = BuildPalette();
 
             // 레이아웃 애니메이션용 타이머(약 60fps)
@@ -120,8 +121,8 @@ namespace FolderGraph.ViewModels
 
         // ── 바인딩 속성 ──────────────────────────────
 
-        public ObservableCollection<NodeViewModel> Nodes { get; private set; }
-        public ObservableCollection<EdgeViewModel> Edges { get; private set; }
+        public BulkObservableCollection<NodeViewModel> Nodes { get; private set; }
+        public BulkObservableCollection<EdgeViewModel> Edges { get; private set; }
 
         public string RootPath
         {
@@ -223,6 +224,15 @@ namespace FolderGraph.ViewModels
         /// <summary>우클릭 팔레트에 표시할 기준 색 목록.</summary>
         public IReadOnlyList<PaletteColor> PaletteColors { get; private set; }
 
+        /// <summary>색상별 노드 집계(좌상단 표시). 색을 바꿀 때마다 갱신.</summary>
+        public ObservableCollection<ColorStat> ColorStats { get; private set; }
+
+        /// <summary>집계에 표시할 항목이 있는지(패널 표시 여부).</summary>
+        public bool HasColorStats
+        {
+            get { return ColorStats != null && ColorStats.Count > 0; }
+        }
+
         /// <summary>색상 팔레트 팝업 열림 여부(View의 Popup.IsOpen과 양방향 바인딩).</summary>
         public bool IsPaletteOpen
         {
@@ -315,7 +325,8 @@ namespace FolderGraph.ViewModels
                             Fill = old.Fill,
                             IsColored = old.IsColored,
                             ColorBase = old.ColorBase,
-                            ColorDepth = old.ColorDepth
+                            ColorDepth = old.ColorDepth,
+                            ColorRootName = old.ColorRootName
                         };
                     }
                 }
@@ -325,8 +336,7 @@ namespace FolderGraph.ViewModels
             _selectedNode = null;
             _highlightMode = HighlightMode.None;
 
-            Nodes.Clear();
-            Edges.Clear();
+            // (Nodes/Edges는 아래에서 Reset으로 일괄 교체 → 개별 Clear 불필요)
 
             // 모델 → 노드VM 매핑
             var map = new Dictionary<FileNodeModel, NodeViewModel>();
@@ -369,29 +379,29 @@ namespace FolderGraph.ViewModels
                         vm.IsColored = s.IsColored;
                         vm.ColorBase = s.ColorBase;
                         vm.ColorDepth = s.ColorDepth;
+                        vm.ColorRootName = s.ColorRootName;
                     }
                 }
             }
 
-            // 노드 등록
-            foreach (NodeViewModel vm in nodeList)
-            {
-                Nodes.Add(vm);
-            }
+            // 노드 일괄 등록(알림 1회 → 뷰가 한 번만 재빌드)
+            Nodes.Reset(nodeList);
 
             // 엣지 + 링크 + VM 자식 트리 구성
             var links = new List<GraphLink>();
+            var edgeList = new List<EdgeViewModel>();
             foreach (FileNodeModel model in data.AllNodes)
             {
                 if (model.Parent != null && map.ContainsKey(model.Parent))
                 {
                     NodeViewModel parentVm = map[model.Parent];
                     NodeViewModel childVm = map[model];
-                    Edges.Add(new EdgeViewModel(parentVm, childVm));
+                    edgeList.Add(new EdgeViewModel(parentVm, childVm));
                     links.Add(new GraphLink(parentVm, childVm));
                     parentVm.Children.Add(childVm); // 선택 시 자손 순회용
                 }
             }
+            Edges.Reset(edgeList);
 
             // 시뮬레이션 초기화 후 시작
             if (nodeList.Count > 0)
@@ -409,6 +419,9 @@ namespace FolderGraph.ViewModels
                 _simulation.Initialize(bodies, links, cx, cy, energy);
                 _simTimer.Start();
             }
+
+            // 색상 집계 갱신(재스캔/이동 후 색 상태 반영)
+            UpdateColorStats();
         }
 
         /// <summary>매 틱 한 스텝 진행. 안정되면 타이머를 멈춰 CPU를 아낀다.</summary>
@@ -627,6 +640,7 @@ namespace FolderGraph.ViewModels
             if (_colorTargetNode != null && pick != null)
             {
                 ApplyColorToSubtree(_colorTargetNode, pick.Color);
+                UpdateColorStats();
             }
             IsPaletteOpen = false;
         }
@@ -636,6 +650,7 @@ namespace FolderGraph.ViewModels
             if (_colorTargetNode != null)
             {
                 ResetSubtreeColor(_colorTargetNode);
+                UpdateColorStats();
             }
             IsPaletteOpen = false;
         }
@@ -666,6 +681,7 @@ namespace FolderGraph.ViewModels
                 nd.Node.IsColored = true;
                 nd.Node.ColorBase = baseColor;
                 nd.Node.ColorDepth = nd.Depth;
+                nd.Node.ColorRootName = root.Name;   // 색칠 출발점 이름(집계용)
 
                 foreach (NodeViewModel child in nd.Node.Children)
                 {
@@ -683,7 +699,95 @@ namespace FolderGraph.ViewModels
             {
                 n.Fill = GrayBrush;
                 n.IsColored = false;
+                n.ColorRootName = null;
             }
+        }
+
+        /// <summary>
+        /// 색상별 노드 집계를 다시 계산한다. 칠해진 노드는 기준색(ColorBase)별로 묶고,
+        /// 라벨은 그 색을 칠한 최상위 노드 이름(여럿이면 "이름 외 N")으로 표시한다.
+        /// 칠하지 않은 노드는 "회색"으로 묶는다. 색을 바꿀 때마다 호출.
+        /// </summary>
+        private void UpdateColorStats()
+        {
+            int total = Nodes.Count;
+            ColorStats.Clear();
+
+            if (total == 0)
+            {
+                OnPropertyChanged("HasColorStats");
+                return;
+            }
+
+            // 기준색(RGB) → 집계 정보(개수 + 루트 이름들)
+            var byColor = new Dictionary<int, ColorAccum>();
+            var order = new List<int>();      // 등장 순서 유지
+            int grayCount = 0;
+
+            foreach (NodeViewModel n in Nodes)
+            {
+                if (!n.IsColored)
+                {
+                    grayCount++;
+                    continue;
+                }
+                Color c = n.ColorBase;
+                int key = (c.R << 16) | (c.G << 8) | c.B;
+
+                ColorAccum acc;
+                if (!byColor.TryGetValue(key, out acc))
+                {
+                    acc = new ColorAccum();
+                    byColor[key] = acc;
+                    order.Add(key);
+                }
+                acc.Count++;
+
+                string rootName = string.IsNullOrEmpty(n.ColorRootName) ? "(이름 없음)" : n.ColorRootName;
+                if (!acc.RootSet.Contains(rootName))
+                {
+                    acc.RootSet.Add(rootName);
+                    acc.RootOrder.Add(rootName);   // 처음 등장한 순서 보존
+                }
+            }
+
+            // 개수 많은 순 정렬
+            order.Sort(delegate (int a, int b) { return byColor[b].Count.CompareTo(byColor[a].Count); });
+
+            foreach (int key in order)
+            {
+                ColorAccum acc = byColor[key];
+                byte r = (byte)((key >> 16) & 0xFF);
+                byte g = (byte)((key >> 8) & 0xFF);
+                byte b = (byte)(key & 0xFF);
+                var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+                brush.Freeze();
+
+                // 라벨: 첫 루트 이름 (+ 외 N)
+                string first = acc.RootOrder.Count > 0 ? acc.RootOrder[0] : "(이름 없음)";
+                int others = acc.RootOrder.Count - 1;
+                string label = others > 0 ? string.Format("{0} 외 {1}", first, others) : first;
+
+                double pct = 100.0 * acc.Count / total;
+                ColorStats.Add(new ColorStat(brush, label, acc.Count, pct));
+            }
+
+            // 회색(미착색)은 맨 아래에
+            if (grayCount > 0)
+            {
+                double pct = 100.0 * grayCount / total;
+                ColorStats.Add(new ColorStat(GrayBrush, "-", grayCount, pct));
+            }
+
+            OnPropertyChanged("HasColorStats");
+        }
+
+        /// <summary>색별 집계용 임시 누적(개수 + 루트 이름 집합).</summary>
+        private class ColorAccum
+        {
+            public int Count;
+            public readonly HashSet<string> RootSet = new HashSet<string>();
+            public readonly List<string> RootOrder = new List<string>();
         }
 
         // ── 파일 열기 / 이동 ─────────────────────────
@@ -772,6 +876,7 @@ namespace FolderGraph.ViewModels
                     movedNode.Y = newParent.Y + 30;
                 }
                 ReheatSimulation();
+                UpdateColorStats(); // 이동 노드 재색칠 반영
             }
 
             StatusText = string.Format("'{0}' 이동 완료", name);
@@ -790,6 +895,8 @@ namespace FolderGraph.ViewModels
 
             Color baseColor = newParent.ColorBase;
             int startDepth = newParent.ColorDepth + 1;
+            string colorRootName = !string.IsNullOrEmpty(newParent.ColorRootName)
+                ? newParent.ColorRootName : newParent.Name;
 
             var queue = new Queue<NodeDepth>();
             var visited = new HashSet<NodeViewModel>();
@@ -810,6 +917,7 @@ namespace FolderGraph.ViewModels
                 nd.Node.IsColored = true;
                 nd.Node.ColorBase = baseColor;
                 nd.Node.ColorDepth = nd.Depth;
+                nd.Node.ColorRootName = colorRootName;
 
                 foreach (NodeViewModel child in nd.Node.Children)
                 {
@@ -878,6 +986,7 @@ namespace FolderGraph.ViewModels
             public bool IsColored;
             public Color ColorBase;
             public int ColorDepth;
+            public string ColorRootName;
         }
     }
 }

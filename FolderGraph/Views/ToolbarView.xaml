@@ -102,26 +102,12 @@
                       Margin="0,0,12,0"
                       IsChecked="{Binding IncludeHidden}" />
 
-            <!-- 미니맵 토글 / PNG 내보내기 -->
+            <!-- PNG 내보내기 -->
             <StackPanel Grid.Column="6" Orientation="Horizontal"
                         VerticalAlignment="Center" Margin="0,0,8,0">
-                <Button Padding="10,4" Margin="0,0,6,0"
-                        ToolTip="전체 미리보기 표시/숨김"
-                        Command="{Binding ToggleMinimapCommand}">
-                    <Button.Style>
-                        <Style TargetType="Button">
-                            <Setter Property="Content" Value="미니맵 켜기" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding ShowMinimap}" Value="True">
-                                    <Setter Property="Content" Value="미니맵 끄기" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Button.Style>
-                </Button>
                 <Button Content="PNG 내보내기"
                         Padding="10,4"
-                        ToolTip="현재 보이는 그래프를 PNG로 저장"
+                        ToolTip="현재 보이는 3D 그래프를 PNG로 저장"
                         Command="{Binding ExportImageCommand}" />
             </StackPanel>
 

@@ -162,6 +162,7 @@
       <SubType>Designer</SubType>
     </ApplicationDefinition>
     <Compile Include="Converters\BooleanToVisibilityConverter.cs" />
+    <Compile Include="Core\BulkObservableCollection.cs" />
     <Compile Include="Core\ObservableObject.cs" />
     <Compile Include="Core\RelayCommand.cs" />
     <Compile Include="Graph\Abstractions\GraphLink.cs" />
@@ -188,6 +189,7 @@
     </Compile>
     <Compile Include="View3D\OrbitCameraController.cs" />
     <Compile Include="View3D\SphereMeshFactory.cs" />
+    <Compile Include="ViewModels\ColorStat.cs" />
     <Compile Include="ViewModels\EdgeViewModel.cs" />
     <Compile Include="ViewModels\MainViewModel.cs" />
     <Compile Include="ViewModels\NodeViewModel.cs" />

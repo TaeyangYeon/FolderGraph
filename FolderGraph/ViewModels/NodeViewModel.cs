@@ -34,7 +34,7 @@ namespace FolderGraph.ViewModels
         public NodeViewModel(FileNodeModel model)
         {
             Model = model;
-            _radius = AppConstants.DefaultNodeRadius;
+            _radius = AppConstants.RadiusForDepth(model.Depth); // 깊이별 5단계 크기
             _fill = Brushes.Gray; // 색 미지정 기본값 = 회색
             _opacity = 1.0;
             _strokeBrush = DefaultStroke;
@@ -161,6 +161,9 @@ namespace FolderGraph.ViewModels
         /// <summary>색 그라데이션 기준에서 이 노드의 상대 깊이(이동 시 자손 깊이 계산에 사용).</summary>
         public int ColorDepth { get; set; }
 
+        /// <summary>이 노드의 색을 칠한 출발점(서브트리 루트)의 이름. 집계 이름 표시에 사용.</summary>
+        public string ColorRootName { get; set; }
+
         public Brush Fill
         {
             get { return _fill; }
@@ -188,11 +191,18 @@ namespace FolderGraph.ViewModels
             set { SetProperty(ref _strokeThickness, value); }
         }
 
+        /// <summary>
+        /// 검색 매칭으로 강조된 상태인지(3D에서 하늘색 발광 표시에 사용).
+        /// 2D는 StrokeBrush로 표현하므로 이 플래그를 쓰지 않는다.
+        /// </summary>
+        public bool IsSearchMatch { get; private set; }
+
         /// <summary>선택 강조 적용(자기 자신이 선택된 노드일 때).</summary>
         public void ApplySelectedStyle()
         {
             StrokeBrush = SelectedStroke;
             StrokeThicknessValue = 2.5;
+            IsSearchMatch = false;
         }
 
         /// <summary>검색 매칭 강조 적용(하늘색 테두리).</summary>
@@ -200,6 +210,7 @@ namespace FolderGraph.ViewModels
         {
             StrokeBrush = SearchStroke;
             StrokeThicknessValue = 2.5;
+            IsSearchMatch = true;
         }
 
         /// <summary>강조 스타일 초기화.</summary>
@@ -208,6 +219,7 @@ namespace FolderGraph.ViewModels
             StrokeBrush = DefaultStroke;
             StrokeThicknessValue = 1.0;
             Opacity = 1.0;
+            IsSearchMatch = false;
         }
 
         /// <summary>X/Y가 바뀌면 Left/Top/Diameter도 갱신 알림.</summary>

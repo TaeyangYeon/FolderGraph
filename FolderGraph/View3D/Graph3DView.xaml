@@ -13,7 +13,31 @@
           MouseUp="Root_MouseUp"
           MouseMove="Root_MouseMove"
           MouseLeave="Root_MouseLeave"
+          MouseRightButtonUp="Root_MouseRightButtonUp"
           MouseWheel="Root_MouseWheel">
+
+        <Grid.Resources>
+            <Style x:Key="SwatchButton" TargetType="Button">
+                <Setter Property="Width" Value="26" />
+                <Setter Property="Height" Value="26" />
+                <Setter Property="Margin" Value="3" />
+                <Setter Property="Cursor" Value="Hand" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    CornerRadius="5" BorderBrush="#33000000" BorderThickness="1" />
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="bd" Property="BorderBrush" Value="#FFFFFF" />
+                                    <Setter TargetName="bd" Property="BorderThickness" Value="2" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </Grid.Resources>
 
         <Viewport3D x:Name="Viewport">
             <Viewport3D.Camera>
@@ -47,6 +71,46 @@
                    Margin="10"
                    Text="좌클릭 드래그: 회전   |   휠 클릭 드래그: 이동   |   휠: 줌   |   클릭: 선택   |   더블클릭: 열기" />
 
+        <!-- 좌상단 색상 집계 -->
+        <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                Margin="10"
+                Background="#CC0F172A" BorderBrush="#334155" BorderThickness="1"
+                CornerRadius="6" Padding="10,8"
+                MaxHeight="320"
+                Visibility="{Binding HasColorStats, Converter={StaticResource BoolToVis}}">
+            <StackPanel>
+                <TextBlock Text="색상별 노드" Foreground="#94A3B8" FontSize="11"
+                           Margin="0,0,0,6" />
+                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="270">
+                    <ItemsControl ItemsSource="{Binding ColorStats}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="140" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Width="14" Height="14"
+                                            CornerRadius="3" Background="{Binding Swatch}"
+                                            BorderBrush="#33000000" BorderThickness="1"
+                                            VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Label}"
+                                               Foreground="#CBD5E1" FontSize="12"
+                                               TextTrimming="CharacterEllipsis"
+                                               ToolTip="{Binding Label}"
+                                               VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Display}"
+                                               Foreground="#E2E8F0" FontSize="12" FontWeight="SemiBold"
+                                               VerticalAlignment="Center" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
+        </Border>
+
         <!-- 호버 툴팁(노드 이름) -->
         <Border x:Name="HoverTip"
                 HorizontalAlignment="Left" VerticalAlignment="Top"
@@ -56,5 +120,42 @@
                 Visibility="Collapsed">
             <TextBlock x:Name="HoverTipText" Foreground="#E2E8F0" FontSize="12" />
         </Border>
+
+        <!-- 색상 팔레트 팝업(우클릭) -->
+        <Popup x:Name="PalettePopup"
+               Placement="Relative"
+               PlacementTarget="{Binding ElementName=Root}"
+               AllowsTransparency="True"
+               StaysOpen="False"
+               IsOpen="{Binding IsPaletteOpen, Mode=TwoWay}">
+            <Border Background="#1E293B" CornerRadius="10" Padding="8"
+                    BorderBrush="#334155" BorderThickness="1">
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000" BlurRadius="12" ShadowDepth="2" Opacity="0.5" />
+                </Border.Effect>
+                <StackPanel Width="148">
+                    <ItemsControl ItemsSource="{Binding PaletteColors}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Style="{StaticResource SwatchButton}"
+                                        Background="{Binding Brush}"
+                                        Command="{Binding DataContext.PickColorCommand,
+                                                  RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                        CommandParameter="{Binding}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Content="회색으로 초기화"
+                            Margin="3,6,3,2" Padding="6,4"
+                            Foreground="#CBD5E1" Background="#0F172A" BorderBrush="#334155"
+                            Command="{Binding ResetColorCommand}" />
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </UserControl>

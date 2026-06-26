@@ -1,10 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Media.Media3D;
 using FolderGraph.ViewModels;
 
@@ -49,15 +51,19 @@ namespace FolderGraph.View3D
         // 노드 드래그 상태
         private NodeViewModel _pressedNode;     // 좌클릭으로 누른 노드(있으면)
         private bool _draggingNode;
+        private bool _dragFreezesOthers;        // 선택 노드 드래그 → 나머지 고정
         private Vector3D _dragPlaneNormal;      // 드래그 평면 법선(카메라 정면)
         private Vector3D _grabOffset3D;         // 노드 중심과 잡은 지점의 3D 차이
-        private bool _dragFreezeOthers;
+        private HashSet<NodeViewModel> _draggedSubtree; // 드래그 노드 자신+자손(드롭 제외)
+        private NodeViewModel _dropTarget;      // 현재 지목된 드롭 대상 폴더
 
         private const double ClickThreshold = 4.0;
 
-        // 선택/호버 발광 색
+        // 선택/검색/호버/드롭 발광 색
         private static readonly Color SelectedGlow = Color.FromRgb(0x60, 0x40, 0x00);
+        private static readonly Color SearchGlow = Color.FromRgb(0x00, 0x55, 0x70);
         private static readonly Color HoverGlow = Color.FromRgb(0x2A, 0x2A, 0x2A);
+        private static readonly Color DropGlow = Color.FromRgb(0x00, 0x40, 0x70);
 
         public Graph3DView()
         {
@@ -99,6 +105,7 @@ namespace FolderGraph.View3D
             {
                 _vm.Nodes.CollectionChanged += OnNodesChanged;
                 _vm.Edges.CollectionChanged += OnEdgesChanged;
+                _vm.ExportImageRequested += OnExportImageRequested;
                 RebuildAll();
             }
         }
@@ -109,6 +116,7 @@ namespace FolderGraph.View3D
             {
                 _vm.Nodes.CollectionChanged -= OnNodesChanged;
                 _vm.Edges.CollectionChanged -= OnEdgesChanged;
+                _vm.ExportImageRequested -= OnExportImageRequested;
                 _vm = null;
             }
         }
@@ -242,6 +250,8 @@ namespace FolderGraph.View3D
 
         // ── 매 프레임 동기화 ─────────────────────────
 
+        private double _lastPosHash = double.NaN;
+
         private void OnRendering(object sender, EventArgs e)
         {
             if (_vm == null)
@@ -249,6 +259,7 @@ namespace FolderGraph.View3D
                 return;
             }
 
+            double hash = 0;
             foreach (KeyValuePair<NodeViewModel, TranslateTransform3D> kv in _nodeTransforms)
             {
                 NodeViewModel node = kv.Key;
@@ -258,11 +269,16 @@ namespace FolderGraph.View3D
                 t.OffsetZ = node.Z;
 
                 UpdateNodeAppearance(node);
+
+                // 위치 변화 감지용 누적(엣지 재구성 여부 판단)
+                hash += node.X * 0.7349 + node.Y * 1.2671 + node.Z * 0.4513;
             }
 
-            if (_edgeMesh != null)
+            // 노드 위치가 바뀐 경우에만 엣지 메시를 다시 만든다(안정 후 매 프레임 재구성 방지)
+            if (_edgeMesh != null && hash != _lastPosHash)
             {
                 BuildEdgeMesh(_edgeMesh);
+                _lastPosHash = hash;
             }
         }
 
@@ -282,20 +298,31 @@ namespace FolderGraph.View3D
             double op = node.Opacity;            // 1.0(강조) ~ 0.22(흐림)
             Color disp = Scale(baseC, op);
             bool selected = node.IsSelected;
+            bool search = node.IsSearchMatch;
             bool hover = (node == _hoveredNode);
+            bool drop = node.IsDropTarget;
 
             DisplayState prev;
             if (_displayCache.TryGetValue(node, out prev) &&
-                prev.Color == disp && prev.Selected == selected && prev.Hover == hover)
+                prev.Color == disp && prev.Selected == selected &&
+                prev.Search == search && prev.Hover == hover && prev.Drop == drop)
             {
                 return; // 변화 없음 → 머티리얼 유지
             }
 
             var group = new MaterialGroup();
             group.Children.Add(new DiffuseMaterial(new SolidColorBrush(disp)));
-            if (selected)
+            if (drop)
+            {
+                group.Children.Add(new EmissiveMaterial(new SolidColorBrush(DropGlow)));
+            }
+            else if (selected)
             {
                 group.Children.Add(new EmissiveMaterial(new SolidColorBrush(SelectedGlow)));
+            }
+            else if (search)
+            {
+                group.Children.Add(new EmissiveMaterial(new SolidColorBrush(SearchGlow)));
             }
             else if (hover)
             {
@@ -309,7 +336,9 @@ namespace FolderGraph.View3D
             {
                 Color = disp,
                 Selected = selected,
-                Hover = hover
+                Search = search,
+                Hover = hover,
+                Drop = drop
             };
         }
 
@@ -341,6 +370,85 @@ namespace FolderGraph.View3D
                 new PointHitTestParameters(screenPoint));
 
             return found;
+        }
+
+        /// <summary>
+        /// 드래그 중 커서 아래의 "폴더 노드"를 드롭 대상으로 지목한다.
+        /// 드래그 중인 노드 자신/자손은 건너뛰고, 폴더만 대상으로 삼는다.
+        /// </summary>
+        private void UpdateDropTarget(Point screen)
+        {
+            NodeViewModel found = null;
+
+            VisualTreeHelper.HitTest(
+                Viewport,
+                null,
+                delegate (HitTestResult hr)
+                {
+                    var rr = hr as RayMeshGeometry3DHitTestResult;
+                    if (rr != null)
+                    {
+                        var gm = rr.ModelHit as GeometryModel3D;
+                        NodeViewModel nv;
+                        if (gm != null && _modelToNode.TryGetValue(gm, out nv))
+                        {
+                            // 드래그 노드 자신/자손은 통과
+                            if (_draggedSubtree != null && _draggedSubtree.Contains(nv))
+                            {
+                                return HitTestResultBehavior.Continue;
+                            }
+                            // 폴더만 드롭 대상
+                            if (nv.Type == FolderGraph.Models.NodeType.Folder)
+                            {
+                                found = nv;
+                                return HitTestResultBehavior.Stop;
+                            }
+                            return HitTestResultBehavior.Continue;
+                        }
+                    }
+                    return HitTestResultBehavior.Continue;
+                },
+                new PointHitTestParameters(screen));
+
+            SetDropTarget(found);
+        }
+
+        private void SetDropTarget(NodeViewModel target)
+        {
+            if (target == _dropTarget)
+            {
+                return;
+            }
+            if (_dropTarget != null)
+            {
+                _dropTarget.IsDropTarget = false;
+            }
+            _dropTarget = target;
+            if (_dropTarget != null)
+            {
+                _dropTarget.IsDropTarget = true;
+            }
+        }
+
+        private void ClearDropTarget()
+        {
+            if (_dropTarget != null)
+            {
+                _dropTarget.IsDropTarget = false;
+                _dropTarget = null;
+            }
+        }
+
+        private void CollectSubtree(NodeViewModel root, HashSet<NodeViewModel> set)
+        {
+            if (!set.Add(root))
+            {
+                return;
+            }
+            foreach (NodeViewModel child in root.Children)
+            {
+                CollectSubtree(child, set);
+            }
         }
 
         // ── 마우스 ───────────────────────────────────
@@ -383,9 +491,27 @@ namespace FolderGraph.View3D
             {
                 if (_draggingNode && _pressedNode != null)
                 {
-                    // 노드 드래그 종료 → 고정 해제(이후 주변과 함께 정리되도록)
+                    if (_dropTarget != null && ViewModel != null)
+                    {
+                        // 폴더 위에 드롭 → 파일 이동 요청
+                        NodeViewModel dragged = _pressedNode;
+                        NodeViewModel target = _dropTarget;
+                        ClearDropTarget();
+
+                        _leftPressed = false;
+                        _draggingNode = false;
+                        _pressedNode = null;
+                        _draggedSubtree = null;
+                        ReleaseIfIdle();
+
+                        ViewModel.RequestMoveAsync(dragged, target);
+                        return;
+                    }
+
+                    // 빈 곳에 드롭 → 단순 이동
                     _pressedNode.IsPinned = false;
-                    if (ViewModel != null)
+                    // 선택 노드 드래그였으면 정지 유지(나머지 가만히), 일반 드래그만 reheat
+                    if (!_dragFreezesOthers && ViewModel != null)
                     {
                         ViewModel.ReheatSimulation();
                     }
@@ -395,7 +521,6 @@ namespace FolderGraph.View3D
                     double moved = (e.GetPosition(Root) - _leftPressPoint).Length;
                     if (moved < ClickThreshold && ViewModel != null)
                     {
-                        // 거의 안 움직였으면 클릭 → 선택/해제
                         NodeViewModel node = HitTestNode(e.GetPosition(Root));
                         if (node != null)
                         {
@@ -409,9 +534,12 @@ namespace FolderGraph.View3D
                 }
             }
 
+            ClearDropTarget();
             _leftPressed = false;
             _draggingNode = false;
+            _dragFreezesOthers = false;
             _pressedNode = null;
+            _draggedSubtree = null;
             ReleaseIfIdle();
         }
 
@@ -489,6 +617,10 @@ namespace FolderGraph.View3D
             _draggingNode = true;
             _pressedNode.IsPinned = true;
 
+            // 드래그 노드 자신+자손(드롭 대상 제외 + 자기 자신으로 이동 방지)
+            _draggedSubtree = new HashSet<NodeViewModel>();
+            CollectSubtree(_pressedNode, _draggedSubtree);
+
             _dragPlaneNormal = _orbit.Forward;
             Point3D nodePos = new Point3D(_pressedNode.X, -_pressedNode.Y, _pressedNode.Z);
 
@@ -496,24 +628,32 @@ namespace FolderGraph.View3D
             if (_orbit.ScreenToPlane(screen.X, screen.Y, Root.ActualWidth, Root.ActualHeight,
                                      nodePos, _dragPlaneNormal, out hit))
             {
-                _grabOffset3D = nodePos - hit; // 잡은 지점과 노드 중심의 차이
+                _grabOffset3D = nodePos - hit;
             }
             else
             {
                 _grabOffset3D = new Vector3D(0, 0, 0);
             }
 
-            _dragFreezeOthers = _pressedNode.IsSelected;
+            // 선택해서 하이라이트된 노드를 드래그하면 나머지를 고정(시뮬레이션 정지),
+            // 그 외 일반 드래그는 주변이 반응하도록 reheat.
+            _dragFreezesOthers = _pressedNode.IsSelected;
             if (ViewModel != null)
             {
-                ViewModel.ReheatSimulation(); // 주변 노드가 따라오도록
+                if (_dragFreezesOthers)
+                {
+                    ViewModel.PauseSimulation();
+                }
+                else
+                {
+                    ViewModel.ReheatSimulation();
+                }
             }
         }
 
-        /// <summary>드래그 중: 노드를 화면 평면 위 마우스 위치로 옮긴다(주변은 시뮬레이션 반응).</summary>
+        /// <summary>드래그 중: 노드를 화면 평면 위 마우스 위치로 옮긴다.</summary>
         private void DragNodeTo(Point screen)
         {
-            // 평면은 노드의 '현재' 위치를 지나도록 갱신(깊이 유지)
             Point3D nodePos = new Point3D(_pressedNode.X, -_pressedNode.Y, _pressedNode.Z);
 
             Point3D hit;
@@ -521,12 +661,15 @@ namespace FolderGraph.View3D
                                      nodePos, _dragPlaneNormal, out hit))
             {
                 Point3D target = hit + _grabOffset3D;
-                // 3D → 노드 좌표(화면 Y는 -Y로 저장했으므로 되돌림)
                 _pressedNode.X = target.X;
                 _pressedNode.Y = -target.Y;
                 _pressedNode.Z = target.Z;
 
-                if (ViewModel != null)
+                // 커서 아래의 폴더 노드를 드롭 대상으로 지목
+                UpdateDropTarget(screen);
+
+                // 선택 노드 드래그는 정지 유지(나머지 고정), 일반 드래그는 주변 반응
+                if (!_dragFreezesOthers && ViewModel != null)
                 {
                     ViewModel.ReheatSimulation();
                 }
@@ -542,6 +685,23 @@ namespace FolderGraph.View3D
         private void Root_MouseWheel(object sender, MouseWheelEventArgs e)
         {
             _orbit.Zoom(e.Delta);
+        }
+
+        // ── 우클릭: 색상 팔레트 ──
+        private void Root_MouseRightButtonUp(object sender, MouseButtonEventArgs e)
+        {
+            NodeViewModel node = HitTestNode(e.GetPosition(Root));
+            if (node == null || ViewModel == null)
+            {
+                return;
+            }
+
+            Point p = e.GetPosition(Root);
+            PalettePopup.HorizontalOffset = p.X;
+            PalettePopup.VerticalOffset = p.Y;
+
+            ViewModel.OpenPaletteFor(node);
+            e.Handled = true;
         }
 
         private void UpdateHover(NodeViewModel node, Point pos)
@@ -599,6 +759,68 @@ namespace FolderGraph.View3D
             _orbit.SetView(center, span * 1.6);
         }
 
+        // ── PNG 내보내기 ─────────────────────────────
+
+        private void OnExportImageRequested(object sender, EventArgs e)
+        {
+            ExportToPng();
+        }
+
+        private void ExportToPng()
+        {
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "PNG 이미지 (*.png)|*.png",
+                FileName = "FolderGraph3D.png",
+                DefaultExt = ".png"
+            };
+            bool? ok = dlg.ShowDialog();
+            if (ok != true)
+            {
+                return;
+            }
+
+            // 캡처 동안 호버 툴팁은 잠깐 숨김
+            Visibility savedTip = HoverTip.Visibility;
+            HoverTip.Visibility = Visibility.Collapsed;
+            try
+            {
+                Root.UpdateLayout();
+
+                int w = (int)Math.Ceiling(Root.ActualWidth);
+                int h = (int)Math.Ceiling(Root.ActualHeight);
+                if (w <= 0 || h <= 0)
+                {
+                    return;
+                }
+
+                var rtb = new RenderTargetBitmap(w, h, 96, 96, PixelFormats.Pbgra32);
+                rtb.Render(Root);
+
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(rtb));
+
+                using (FileStream fs = File.Create(dlg.FileName))
+                {
+                    encoder.Save(fs);
+                }
+
+                if (ViewModel != null)
+                {
+                    ViewModel.StatusText = "이미지를 저장했습니다: " + dlg.FileName;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("이미지 저장에 실패했습니다.\n" + ex.Message,
+                                "오류", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                HoverTip.Visibility = savedTip;
+            }
+        }
+
         // ── 색 변환 ──────────────────────────────────
 
         private static Color ToColor(Brush fill)
@@ -626,7 +848,9 @@ namespace FolderGraph.View3D
         {
             public Color Color;
             public bool Selected;
+            public bool Search;
             public bool Hover;
+            public bool Drop;
         }
     }
 }
